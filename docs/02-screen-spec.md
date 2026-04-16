@@ -229,6 +229,7 @@ observer では stop / rerun を非表示にする。
 - selected task lineage card
 - unique id
 - parameter diff vs previous successful run
+- compare resolution status / strategy / ambiguous state
 - upstream / downstream links
 - outputs
 - rerun reason
@@ -303,6 +304,7 @@ station と target project の接続状態と権限を明示する。
 - access mode
 - target project root
 - workspace directory
+- workspace symlink policy
 - python executable
 - entrypoint path
 - resolved config files
@@ -313,6 +315,7 @@ station と target project の接続状態と権限を明示する。
 
 ### 主操作
 - mode change
+- workspace symlink override
 - revalidate
 - test scheduler
 - test workspace access

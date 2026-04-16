@@ -11,7 +11,8 @@
       "!**/playwright-report",
       "!prisma/dev.db",
       "!.gokart-station",
-      "!apps/py_adapter/.venv"
+      "!apps/py_adapter/.venv",
+      "!.venv_sample"
     ]
   },
   "formatter": {

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
@@ -9,9 +10,29 @@ export const sampleProjectSourceDir = fileURLToPath(
   new URL("../../../../examples/sample_gokart_project", import.meta.url),
 );
 
+const sampleProjectPythonExecutable = fileURLToPath(
+  new URL("../../../../.venv_sample/bin/python", import.meta.url),
+);
+
+const sampleProjectLuigidExecutable = fileURLToPath(
+  new URL("../../../../.venv_sample/bin/luigid", import.meta.url),
+);
+
 export const mockLuigidExecutablePath = fileURLToPath(
   new URL("../fixtures/mock-luigid.mjs", import.meta.url),
 );
+
+export const resolveSampleProjectPythonExecutable = () => {
+  return existsSync(sampleProjectPythonExecutable)
+    ? sampleProjectPythonExecutable
+    : (process.env.GOKART_STATION_SAMPLE_PYTHON ?? "python3");
+};
+
+export const resolveSampleProjectLuigidExecutable = () => {
+  return existsSync(sampleProjectLuigidExecutable)
+    ? sampleProjectLuigidExecutable
+    : (process.env.GOKART_STATION_SAMPLE_LUIGID ?? "luigid");
+};
 
 export const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -67,6 +88,8 @@ export const prepareSampleProjectFixture = async (prefix: string) => {
     observerWorkspaceDirectory: await fs.realpath(observerWorkspaceDirectory),
     supportBundleRuntimeDirectory,
     schedulerRuntimeDirectory,
+    pythonExecutable: resolveSampleProjectPythonExecutable(),
+    luigidExecutable: resolveSampleProjectLuigidExecutable(),
   };
 };
 

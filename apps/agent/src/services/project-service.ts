@@ -83,11 +83,12 @@ export class ProjectService {
     if (
       project.connection.accessMode !== "observer" &&
       (schedulerStatus.health === "unreachable" ||
+        schedulerStatus.health === "degraded" ||
         (schedulerStatus.health === "unknown" && Boolean(project.connection.schedulerBaseUrl)))
     ) {
       issues.push({
         code: "scheduler_unreachable",
-        message: "Scheduler health check failed.",
+        message: "Scheduler health check returned a non-healthy status.",
         level: "warning",
         field: "schedulerBaseUrl",
       });

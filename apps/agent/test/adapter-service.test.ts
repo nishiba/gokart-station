@@ -6,6 +6,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { AdapterRunRequest } from "@gokart-station/shared";
 import { AdapterService } from "../src/services/adapter-service";
+import { removeDirectoryWithRetries } from "./helpers/cleanup";
+import { resolveSampleProjectPythonExecutable } from "./helpers/sample-project";
 
 const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -44,16 +46,20 @@ const buildRequest = (targetProjectDir: string, workspaceDirectory: string): Ada
   accessMode: "operator",
   projectRootDir: targetProjectDir,
   workspaceDirectory,
-  pythonExecutable: "python3",
+  pythonExecutable: resolveSampleProjectPythonExecutable(),
   entrypointPath: "main.py",
   schedulerBaseUrl: null,
   configValues: {
-    sample_key: "value",
+    "sample_gokart.message_suffix": "[config-profile]",
+    "sample_gokart.metadata_tag": "adapter-service-tag",
+    "sample_gokart.secret_note": "adapter-service-config-secret",
   },
+  configMaskedKeys: ["sample_gokart.secret_note"],
   envValues: {
-    ENV_NAME: "value",
+    SAMPLE_GOKART_MESSAGE_PREFIX: "[agent-env] ",
+    SAMPLE_GOKART_SECRET_TOKEN: "adapter-service-env-secret",
   },
-  envMaskedKeys: ["SECRET_TOKEN"],
+  envMaskedKeys: ["SAMPLE_GOKART_SECRET_TOKEN"],
   spec: {
     rootTaskName: "PublishReport",
     label: "sample project adapter run",
@@ -76,6 +82,7 @@ test("adapter service can spawn the Python adapter via stdin and temp file", asy
     pythonExecutable: "python3",
   });
   const request = buildRequest(fixture.targetProjectDir, fixture.workspaceDirectory);
+  const maskedSecrets = ["adapter-service-env-secret", "adapter-service-config-secret"];
 
   try {
     const stdinResult = await adapterService.runOnce(request, {
@@ -92,6 +99,17 @@ test("adapter service can spawn the Python adapter via stdin and temp file", asy
           event.absolutePath.startsWith(fixture.workspaceDirectory),
       ),
     );
+    assert.ok(
+      stdinResult.events.some(
+        (event) => event.type === "task.log" && event.line.includes("***MASKED***"),
+      ),
+    );
+    assert.ok(
+      stdinResult.events.every((event) => {
+        const serializedEvent = JSON.stringify(event);
+        return maskedSecrets.every((secret) => !serializedEvent.includes(secret));
+      }),
+    );
 
     const fileResult = await adapterService.runOnce(request, {
       cwd: fixture.targetProjectDir,
@@ -103,9 +121,6 @@ test("adapter service can spawn the Python adapter via stdin and temp file", asy
     const runStartedEvent = fileResult.events.find((event) => event.type === "run.started");
     assert.equal(runStartedEvent?.projectRootDir, fixture.targetProjectDir);
   } finally {
-    await fs.rm(fixture.tempRootDir, {
-      recursive: true,
-      force: true,
-    });
+    await removeDirectoryWithRetries(fixture.tempRootDir);
   }
 });

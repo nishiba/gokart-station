@@ -2,6 +2,7 @@ import { z } from "zod";
 import { idSchema, nonEmptyStringSchema } from "../schemas/common";
 import {
   artifactManifestEntrySchema,
+  compareResolutionMetadataSchema,
   jsonParameterValueSchema,
   logEventSchema,
   rerunModeSchema,
@@ -80,6 +81,7 @@ export const lineageComparePreviousSuccessResponseSchema = z.object({
       added: z.array(z.string().min(1)),
       removed: z.array(z.string().min(1)),
     }),
+    compareResolution: compareResolutionMetadataSchema,
   }),
 });
 

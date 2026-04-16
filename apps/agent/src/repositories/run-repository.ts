@@ -493,16 +493,16 @@ export class RunRepository {
     return record ? mapRun(record) : null;
   }
 
-  async findLineageNodeByRunAndTaskName(runId: string, taskName: string) {
-    const record = await this.prisma.taskLineageNode.findFirst({
+  async listLineageNodesByRunAndTaskName(runId: string, taskName: string) {
+    const records = await this.prisma.taskLineageNode.findMany({
       where: {
         runId,
         taskName,
       },
-      orderBy: [{ createdAt: "asc" }],
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
     });
 
-    return record ? mapTaskLineageNode(record) : null;
+    return records.map(mapTaskLineageNode);
   }
 
   async upsertTaskDiscovered(runId: string, task: AdapterTaskDiscoveredPayload) {

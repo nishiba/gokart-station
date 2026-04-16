@@ -194,6 +194,7 @@ first-class object は次である。
   - scheduler payload
   - stderr
 - support bundle は runtime 配下に生成し、mode / capability / validation snapshot を必ず含める
+- support bundle は masked 済み payload と metadata を集約し、profile source file の中身を含めない
 
 ---
 
@@ -203,10 +204,14 @@ first-class object は次である。
 - operator / managed では rootDir / workspace 外アクセスを拒否する
 - observer では workspace 外アクセスを拒否する
 - symlink 逸脱を拒否する
+- `projectRootDir` は symlink 禁止とする
+- `workspaceDirectory` は `allowWorkspaceDirectorySymlink = true` の明示時だけ許可し、既定は禁止とする
+- `luigiConfigPath` / `envSourcePath` は symlink 禁止とする
 - env secret をログ出力しない
 - process group 単位で cleanup する
 - zombie process を残さない
 - watch service は sandbox scope 外を監視しない
+- watch service は event-driven を優先し、fallback scan は backoff させる
 
 ---
 
@@ -271,8 +276,10 @@ docs 未更新の実装追加は禁止する。
 
 - release 前の user-facing source of truth は `README.md`, `docs/README.md`, `docs/10-acceptance-criteria.md`, `AGENTS.md` の 4 点を同期する
 - sample project を使った observer / operator の再現手順を `README.md` に残す
+- sample project の README / root README に maintainer ローカル絶対パスを残さない
 - release 前チェックは root `package.json` の `release:check` script を基準にする
 - automated verification には success / failed / partial failure, observer / operator 差分, scheduler lifecycle, support bundle content, web smoke E2E を含める
+- support bundle の説明と test は、masked secret が bundle manifest / bundled payload に平文で残らない前提に揃える
 - known limitations は実装と矛盾しない形で文書化する
 - file tree は metadata-only browsing のまま release してよく、未実装の text preview を完成済みとして扱ってはならない
 - support bundle export が runtime directory + manifest であることを隠さない

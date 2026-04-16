@@ -131,6 +131,7 @@ export const statusTone = (status: StatusValue) => {
       return "info";
     case "stopping":
     case "warning":
+    case "partial":
     case "degraded":
       return "warning";
     default:

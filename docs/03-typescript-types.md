@@ -37,6 +37,7 @@ export type TaskState =
 export type SchedulerHealth =
   | "unknown"
   | "healthy"
+  | "partial"
   | "degraded"
   | "unreachable";
 
@@ -86,6 +87,7 @@ export interface ProjectConnection {
   pythonExecutable?: string | null;
   entrypointPath?: string | null;
   workspaceDirectory: string;
+  allowWorkspaceDirectorySymlink?: boolean;
   luigiConfigPath?: string | null;
   envSourcePath?: string | null;
   schedulerBaseUrl?: string | null;
@@ -183,6 +185,52 @@ export interface TaskLineageNode {
   downstreamNodeIds: TaskNodeId[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type CompareResolutionStatus =
+  | "matched"
+  | "no_previous_success"
+  | "no_candidate"
+  | "ambiguous";
+
+export type CompareResolutionStrategy =
+  | "task_name_unique_candidate"
+  | "unique_id"
+  | "parameter_fingerprint"
+  | "topology_signature"
+  | "output_path_signature";
+
+export interface CompareResolutionMetadata {
+  status: CompareResolutionStatus;
+  strategy?: CompareResolutionStrategy | null;
+  previousRunId?: RunId | null;
+  matchedTaskNodeId?: TaskNodeId | null;
+  sameTaskNameCandidateTaskNodeIds: TaskNodeId[];
+  attempts: Array<{
+    strategy: CompareResolutionStrategy;
+    candidateTaskNodeIds: TaskNodeId[];
+    candidateCount: number;
+  }>;
+  evidence: {
+    currentUniqueId: string;
+    currentParameterFingerprint: string;
+    currentUpstreamSignature: string;
+    currentDownstreamSignature: string;
+    currentOutputPathSignature: string;
+  };
+  message: string;
+}
+
+export interface LineageComparePreviousSuccessResponse {
+  current: TaskLineageNode;
+  previous: TaskLineageNode | null;
+  diff: {
+    parameterDiff: Record<string, { current?: unknown; previous?: unknown }>;
+    stateChanged: boolean;
+    processingTimeDiffSec: number | null;
+    outputPathDiff: { added: string[]; removed: string[] };
+    compareResolution: CompareResolutionMetadata;
+  };
 }
 
 export interface TaskGraph {
@@ -296,11 +344,16 @@ export interface AdapterRunRequest {
   envSourcePath?: string | null;
   schedulerBaseUrl?: string | null;
   configValues: Record<string, string>;
+  configMaskedKeys: string[];
   envValues: Record<string, string>;
   envMaskedKeys: string[];
   spec: RunSpec;
 }
 ```
+
+- `configValues` は flat object のまま保存するが、adapter 実行時には `section.option` 形式の key を Luigi config INI に materialize して target process に渡す
+- `section.` を含まない key は `[DEFAULT]` に materialize してよい
+- `configMaskedKeys` / `envMaskedKeys` に含まれる値は adapter が target stdout / stderr / raw task info を event 化する前に再マスクする
 
 adapter event contract は JSONL の discriminated union とする。
 
@@ -327,6 +380,8 @@ export type AdapterEventType =
 - `task.status_changed` は `taskName`, `uniqueId`, `state` を持つ
 - `task.log` は `taskName`, `uniqueId`, `stream`, `line` を持つ
 - `scheduler.snapshot` は `health`, `activeTaskCount`, `pendingTaskCount`, `failedTaskCount`, `workerCount`, `raw` を持つ
+- `scheduler.snapshot.raw` は `healthProbe`, `snapshotSource`, `completeness`, `counts`, `endpoints`, `errors` を持てる
+- `compare-previous-success` は `compareResolution` を持ち、`matched | no_previous_success | no_candidate | ambiguous` と解決根拠を返す
 - `artifact.discovered` は `kind`, `absolutePath`, `relativePath`, `previewable` を持つ
 - `raw.task_info_tree` / `raw.task_info_table` は `raw` を持つ
 - `adapter.warning` / `adapter.error` は `code`, `message` を持つ

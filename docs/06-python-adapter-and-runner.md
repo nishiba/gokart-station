@@ -20,9 +20,12 @@ gokart には task info の table / tree を生成する API があり、Python 
 
 - run spec を受け取る
 - config / env profile を展開する
-- `luigid` 前提で gokart run を実行する
-- task info tree / table を出力する
-- lineage node を JSON に変換する
+- config profile を temporary Luigi config に materialize して merge する
+- target project の entrypoint command を組み立てる
+- target project の entrypoint を subprocess で起動する
+- stdout / stderr を購読し、station event contract に変換する
+- task info tree / table raw を target project から受け取る
+- lineage node を JSON に正規化する
 - artifact manifest を生成する
 - log event を逐次出力する
 - scheduler snapshot を定期取得する
@@ -33,6 +36,22 @@ gokart には task info の table / tree を生成する API があり、Python 
 ### RunSpec -> temp file / stdin
 RunSpec は stdin または temp JSON file で渡す。  
 station 本体と target repo を分離しやすくするため、target repo 内の Python コードへ station 固有型を直接 import させない。
+
+### command build
+adapter 自体は fixed task plan を持たず、request から target project 実行 command を組み立てる。
+
+- `pythonExecutable`
+- `entrypointPath`
+- `rootTaskName`
+- `parameters`
+- `--tree-info-mode`
+- `--tree-info-output-path`
+- `schedulerBaseUrl` がある場合は `--local-scheduler` より localhost scheduler host / port 指定を優先
+- `configValues` は `section.option` key を INI に materialize し、`LUIGI_CONFIG_PATH` へ merge 済み temp config path を渡す
+- `envValues` は subprocess env に merge し、`GOKART_STATION_RUN_ID` / `GOKART_STATION_PROJECT_ID` も追加する
+- masked key の値は target stdout / stderr と raw task info を station event に変換する前に再マスクする
+
+sample project 固有の DAG / task info helper は adapter 本体ではなく `examples/*` 側に置く。
 
 ### 生成物
 - `task-info-tree.pkl` または text raw
@@ -77,13 +96,16 @@ stdin または temp file で RunSpec を渡す。
   "entrypointPath": "main.py",
   "schedulerBaseUrl": "http://127.0.0.1:8082",
   "configValues": {
-    "sample_key": "value"
+    "sample_gokart.message_suffix": "[profile-config]"
+  },
+  "configMaskedKeys": [
+    "sample_gokart.secret_value"
   },
   "envValues": {
-    "ENV_NAME": "value"
+    "SAMPLE_GOKART_MESSAGE_PREFIX": "[profile-env] "
   },
   "envMaskedKeys": [
-    "SECRET_TOKEN"
+    "SAMPLE_GOKART_SECRET_TOKEN"
   ],
   "spec": {
     "rootTaskName": "sample.SomeTask",
@@ -103,7 +125,7 @@ stderr は debug / raw error 用とする。
 event 例:
 ```json
 {"type":"run.started","runId":"run_1","at":"..."}
-{"type":"scheduler.snapshot","health":"healthy","activeTaskCount":3,"at":"..."}
+{"type":"scheduler.snapshot","health":"partial","activeTaskCount":3,"workerCount":1,"raw":{"snapshotSource":"luigid_rpc","completeness":"partial"},"at":"..."}
 {"type":"task.status_changed","taskName":"sample.SomeTask","state":"RUNNING","at":"..."}
 {"type":"artifact.discovered","path":"/tmp/resources/output.pkl","kind":"output","at":"..."}
 {"type":"run.finished","runId":"run_1","status":"success","at":"..."}
@@ -125,6 +147,14 @@ event contract は次を最低限固定する。
 - `run.finished`
 
 各 event は `type`, `runId`, `at` を共通で持つ。
+
+`scheduler.snapshot` は health probe と分離して `luigid` RPC から取得する。
+
+- health は疎通確認を示す
+- snapshot は worker / task 概況を示す
+- `health` は `healthy | partial | degraded | unreachable | unknown`
+- `raw.completeness` は `complete | partial | unavailable | malformed | not_configured`
+- endpoint 単位の失敗は `raw.errors[]` に残し、取得できた payload は `raw.endpoints` に残す
 
 ## scheduler 連携
 
@@ -148,8 +178,8 @@ lineage node は最低限以下を持つ。
 - task log
 - upstream / downstream
 
-MVP では adapter が task info tree / table を JSON で返し、Node 側の主要 read model はその JSON を優先して構築する。  
-text tree-info は raw artifact として保持するが、中心 read model にはしない。
+MVP では target project が task info tree / table raw を JSON で出力し、adapter はそれを読み取って station event contract に変換する。  
+Node 側の主要 read model はその JSON を優先して構築する。text tree-info は raw artifact として保持するが、中心 read model にはしない。
 
 ## artifact manifest 生成
 
@@ -192,16 +222,26 @@ adapter は partial failure を許容する。
 - artifact manifest 生成失敗でも logs と scheduler snapshot は残す
 - どれか一つが壊れても UI 全体を壊さない
 
+## config / env profile の runtime 反映
+
+- env profile は subprocess env に merge する
+- config profile は `section.option` 形式の key を temp Luigi config INI に materialize して target process に渡す
+- project connection に `luigiConfigPath` がある場合は、その内容を base として temp config へ overlay する
+- target process には `GOKART_STATION_RUN_ID` と `GOKART_STATION_PROJECT_ID` を常に渡す
+- temp config file は run 後に cleanup する
+
 ## observer mode との関係
 
 observer mode では adapter を run 実行のためには使わない。  
 必要なら raw artifact の後処理や support bundle 生成に限定して使う。
 
-## sample fixture
+## sample project
 
 検証用 target repo は `examples/sample_gokart_project` に置く。
 
 - station repo と同じディレクトリ配下に同梱してよいが、test では temp copy を作って **別ディレクトリの target repo** として扱う
+- README では maintainer ローカル絶対パスを避け、copy 先が変わっても使える相対手順を書く
 - workspace は `projectRootDir` とは別の外部ディレクトリを向けられるようにする
+- sample project 固有の task info / artifact helper は `examples/sample_gokart_project` 側に閉じる
 - observer mode では sample project の workspace を read-only で観測し、run / scheduler lifecycle は使わない
 - operator mode では sample project の `main.py` を entrypoint にして validate / scheduler / adapter integration を行う

@@ -112,7 +112,8 @@ observer 例:
   "name": "sample-observer",
   "connection": {
     "accessMode": "observer",
-    "workspaceDirectory": "/Users/me/data/sample-workspace"
+    "workspaceDirectory": "/Users/me/data/sample-workspace",
+    "allowWorkspaceDirectorySymlink": false
   }
 }
 ```
@@ -127,12 +128,19 @@ operator 例:
     "pythonExecutable": "/Users/me/.pyenv/shims/python",
     "entrypointPath": "main.py",
     "workspaceDirectory": "/Users/me/data/sample-workspace",
+    "allowWorkspaceDirectorySymlink": false,
     "luigiConfigPath": "/Users/me/dev/sample/luigi.cfg",
     "envSourcePath": "/Users/me/dev/sample/.env",
     "schedulerBaseUrl": "http://127.0.0.1:8082"
   }
 }
 ```
+
+補足:
+- `allowWorkspaceDirectorySymlink` は optional boolean で default は `false`
+- `projectRootDir` は symlink 不可
+- `workspaceDirectory` は `allowWorkspaceDirectorySymlink = true` のときだけ symlink を許可する
+- `luigiConfigPath` / `envSourcePath` は symlink 不可
 
 ### `GET /api/projects/:projectId`
 レスポンス:
@@ -292,6 +300,16 @@ compare MVP は次に限定する。
 - state diff
 - processing time diff
 - output path diff
+- compare target resolution metadata
+
+compare target resolution は次の順で行う。
+- `uniqueId` 完全一致
+- parameter fingerprint 一致
+- upstream / downstream signature 一致
+- output path signature 一致
+- 上記で解決できず、previous successful run 内の同名 candidate が 1 件だけならそれを使う fallback を許容する
+
+一意に解決できない場合は `previous = null` とし、`diff.compareResolution.status = "ambiguous"` を返す。
 
 artifact content diff は後回しとする。
 
@@ -335,7 +353,7 @@ binary 例:
 
 補足:
 - `raw/task-info-tree` と `raw/task-info-table` は adapter が出した JSON をそのまま返してよい
-- `raw/scheduler` は snapshot の raw payload 群を返してよい
+- `raw/scheduler` は `snapshotId`, `health`, `activeTaskCount`, `pendingTaskCount`, `failedTaskCount`, `workerCount`, `capturedAt`, `raw` を持つ snapshot 配列を返してよい
 - `raw/adapter-events` は adapter JSONL を parse した event 配列を返してよい
 
 ---
@@ -382,6 +400,10 @@ MVP では station runtime 配下に support bundle directory を生成し、`bu
 - files tree snapshot
 - recent runs summary
 - latest run の logs / timeline / artifact manifest / raw payloads の一部
+
+制約:
+- bundle には masked 済み payload と metadata を含める
+- env / config profile の生値や source file content は bundle に含めない
 
 ---
 

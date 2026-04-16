@@ -62,6 +62,7 @@ class AdapterRunRequest:
     env_source_path: str | None = None
     scheduler_base_url: str | None = None
     config_values: dict[str, str] = field(default_factory=dict)
+    config_masked_keys: list[str] = field(default_factory=list)
     env_values: dict[str, str] = field(default_factory=dict)
     env_masked_keys: list[str] = field(default_factory=list)
 
@@ -81,6 +82,7 @@ class AdapterRunRequest:
             env_source_path=_optional_string(data, "envSourcePath"),
             scheduler_base_url=_optional_string(data, "schedulerBaseUrl"),
             config_values=_require_string_mapping(data, "configValues"),
+            config_masked_keys=_require_string_list(data, "configMaskedKeys"),
             env_values=_require_string_mapping(data, "envValues"),
             env_masked_keys=_require_string_list(data, "envMaskedKeys"),
         )
@@ -99,6 +101,7 @@ class AdapterRunRequest:
             "envSourcePath": self.env_source_path,
             "schedulerBaseUrl": self.scheduler_base_url,
             "configValues": self.config_values,
+            "configMaskedKeys": self.config_masked_keys,
             "envValues": self.env_values,
             "envMaskedKeys": self.env_masked_keys,
             "spec": self.spec.to_dict(),
@@ -117,6 +120,7 @@ class AdapterRunRequest:
             entrypoint_path="main.py",
             scheduler_base_url="http://127.0.0.1:8082",
             config_values={"sample_key": "value"},
+            config_masked_keys=["sample.secret"],
             env_values={"ENV_NAME": "value"},
             env_masked_keys=["SECRET_TOKEN"],
             spec=RunSpec(
@@ -128,6 +132,8 @@ class AdapterRunRequest:
                 capture_artifact_manifest=True,
             ),
         )
+
+
 def _require_string(data: Mapping[str, Any], key: str) -> str:
     value = data.get(key)
     if not isinstance(value, str) or value == "":

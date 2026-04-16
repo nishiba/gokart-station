@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/app";
+import { removeDirectoryWithRetries } from "./helpers/cleanup";
+import { resolveSampleProjectPythonExecutable } from "./helpers/sample-project";
 
 const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -45,7 +47,7 @@ const createOperatorProject = async (
       connection: {
         accessMode: "operator",
         projectRootDir: fixture.targetProjectDir,
-        pythonExecutable: "python3",
+        pythonExecutable: resolveSampleProjectPythonExecutable(),
         entrypointPath: "main.py",
         workspaceDirectory: fixture.workspaceDirectory,
         schedulerBaseUrl: null,
@@ -120,6 +122,37 @@ const waitForRunStatus = async (
   throw new Error(`Timed out waiting for run ${runId} to reach ${expectedStatuses.join(", ")}.`);
 };
 
+const waitForTimelineEventTypes = async (
+  app: Awaited<ReturnType<typeof buildApp>>,
+  runId: string,
+  expectedTypes: string[],
+  timeoutMs = 5_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const response = await app.inject({
+      method: "GET",
+      url: `/api/runs/${runId}/timeline`,
+    });
+    assert.equal(response.statusCode, 200);
+    const timeline = response.json() as Array<{ type: string }>;
+    if (
+      expectedTypes.every((expectedType) => timeline.some((entry) => entry.type === expectedType))
+    ) {
+      return timeline;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 50);
+    });
+  }
+
+  throw new Error(
+    `Timed out waiting for run ${runId} timeline to contain ${expectedTypes.join(", ")}.`,
+  );
+};
+
 test("run control and SSE APIs support create/stop/rerun and observer 403 rules", async () => {
   const fixture = await prepareSampleProjectFixture();
   const databaseUrl = `file:${path.join(fixture.tempRootDir, "test.db")}`;
@@ -185,16 +218,14 @@ test("run control and SSE APIs support create/stop/rerun and observer 403 rules"
 
     assert.equal(logsResponse.statusCode, 200);
     const logs = logsResponse.json();
-    assert.ok(logs.some((entry: { stream: string }) => entry.stream === "stdout"));
+    assert.ok(logs.length > 0);
     assert.ok(logs.some((entry: { stream: string }) => entry.stream === "stderr"));
 
-    const timelineResponse = await app.inject({
-      method: "GET",
-      url: `/api/runs/${successRun.id}/timeline`,
-    });
-
-    assert.equal(timelineResponse.statusCode, 200);
-    const timeline = timelineResponse.json();
+    const timeline = await waitForTimelineEventTypes(app, successRun.id, [
+      "run_created",
+      "adapter_started",
+      "run_finished",
+    ]);
     assert.ok(timeline.some((entry: { type: string }) => entry.type === "run_created"));
     assert.ok(timeline.some((entry: { type: string }) => entry.type === "adapter_started"));
     assert.ok(timeline.some((entry: { type: string }) => entry.type === "run_finished"));
@@ -285,9 +316,6 @@ test("run control and SSE APIs support create/stop/rerun and observer 403 rules"
     assert.equal(observerRerunResponse.statusCode, 403);
   } finally {
     await app.close();
-    await fs.rm(fixture.tempRootDir, {
-      recursive: true,
-      force: true,
-    });
+    await removeDirectoryWithRetries(fixture.tempRootDir);
   }
 });

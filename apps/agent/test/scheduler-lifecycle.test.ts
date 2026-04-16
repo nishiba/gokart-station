@@ -7,6 +7,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/app";
+import { SchedulerService } from "../src/services/scheduler-service";
+import { removeDirectoryWithRetries } from "./helpers/cleanup";
 
 const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -127,6 +129,17 @@ test("scheduler lifecycle start/stop/restart/logs are available for operator pro
     assert.equal(startedHealth.port, port);
     assert.equal(startedHealth.pidFilePath, path.join(schedulerRuntimeDir, "luigid.pid.json"));
 
+    const snapshotService = new SchedulerService({
+      runtimeDirectory: schedulerRuntimeDir,
+    });
+    const schedulerSnapshot = await snapshotService.getSnapshot(startedHealth.schedulerBaseUrl);
+    assert.equal(schedulerSnapshot.health, "healthy");
+    assert.equal(schedulerSnapshot.workerCount, 1);
+    assert.equal(schedulerSnapshot.activeTaskCount, 1);
+    assert.equal(schedulerSnapshot.pendingTaskCount, 2);
+    assert.equal(schedulerSnapshot.failedTaskCount, 1);
+    assert.equal((schedulerSnapshot.raw as { completeness: string }).completeness, "complete");
+
     const healthResponse = await app.inject({
       method: "GET",
       url: `/api/scheduler/health?projectId=${operatorProject.id}`,
@@ -176,7 +189,89 @@ test("scheduler lifecycle start/stop/restart/logs are available for operator pro
     assert.equal(stoppedHealth.health, "unknown");
   } finally {
     await app.close();
-    await fs.rm(testRootDir, { recursive: true, force: true });
+    await removeDirectoryWithRetries(testRootDir);
+  }
+});
+
+test("scheduler snapshot distinguishes partial payloads from basic health reachability", async () => {
+  const port = await findFreePort();
+  const schedulerService = new SchedulerService();
+  const partialServer = http.createServer((request, response) => {
+    const requestUrl = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+
+    if (requestUrl.pathname === "/api/worker_list") {
+      response.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      response.end(
+        JSON.stringify({
+          response: [{ name: "partial-worker" }],
+        }),
+      );
+      return;
+    }
+
+    if (requestUrl.pathname === "/api/task_list") {
+      const rawData = requestUrl.searchParams.get("data");
+      const payload = rawData ? (JSON.parse(rawData) as { status?: string }) : {};
+
+      if (payload.status === "RUNNING") {
+        response.writeHead(200, {
+          "content-type": "application/json; charset=utf-8",
+        });
+        response.end(JSON.stringify({ response: "not-an-object" }));
+        return;
+      }
+
+      if (payload.status === "PENDING") {
+        response.writeHead(503, {
+          "content-type": "application/json; charset=utf-8",
+        });
+        response.end(JSON.stringify({ error: "temporarily unavailable" }));
+        return;
+      }
+
+      response.writeHead(200, {
+        "content-type": "application/json; charset=utf-8",
+      });
+      response.end(JSON.stringify({ response: {} }));
+      return;
+    }
+
+    response.writeHead(200, {
+      "content-type": "text/plain; charset=utf-8",
+    });
+    response.end("partial scheduler ok");
+  });
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      partialServer.once("error", reject);
+      partialServer.listen(port, "127.0.0.1", () => resolve());
+    });
+
+    const health = await schedulerService.getHealth(`http://127.0.0.1:${port}`);
+    assert.equal(health.health, "healthy");
+
+    const snapshot = await schedulerService.getSnapshot(`http://127.0.0.1:${port}`);
+    assert.equal(snapshot.health, "partial");
+    assert.equal(snapshot.workerCount, 1);
+    assert.equal(snapshot.activeTaskCount, 0);
+    assert.equal(snapshot.pendingTaskCount, 0);
+    assert.equal(snapshot.failedTaskCount, 0);
+    assert.equal((snapshot.raw as { completeness: string }).completeness, "partial");
+    assert.ok(((snapshot.raw as { errors: unknown[] }).errors ?? []).length >= 2);
+  } finally {
+    await new Promise<void>((resolve, reject) => {
+      partialServer.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      });
+    });
   }
 });
 
@@ -243,6 +338,6 @@ test("scheduler start detects localhost port conflicts", async () => {
       });
     });
     await app.close();
-    await fs.rm(testRootDir, { recursive: true, force: true });
+    await removeDirectoryWithRetries(testRootDir);
   }
 });

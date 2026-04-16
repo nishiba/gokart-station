@@ -57,6 +57,59 @@ const diffIsMeaningful = (compare: CompareRecord | undefined) => {
   );
 };
 
+const compareResolutionTone = (compare: CompareRecord | undefined) => {
+  const status = compare?.diff.compareResolution.status;
+  if (status === "matched") {
+    return "border-emerald-200 bg-emerald-50 text-emerald-900";
+  }
+
+  if (status === "ambiguous") {
+    return "border-amber-200 bg-amber-50 text-amber-900";
+  }
+
+  return "border-slate-200 bg-slate-50 text-slate-700";
+};
+
+const formatCompareResolutionLabel = (compare: CompareRecord | undefined) => {
+  const status = compare?.diff.compareResolution.status;
+  if (status === "matched") {
+    return "compare resolved";
+  }
+
+  if (status === "ambiguous") {
+    return "ambiguous compare target";
+  }
+
+  if (status === "no_previous_success") {
+    return "no previous success";
+  }
+
+  if (status === "no_candidate") {
+    return "no compare target";
+  }
+
+  return "compare unavailable";
+};
+
+const formatCompareStrategyLabel = (
+  strategy: CompareRecord["diff"]["compareResolution"]["strategy"],
+) => {
+  switch (strategy) {
+    case "task_name_unique_candidate":
+      return "single same-task candidate";
+    case "unique_id":
+      return "uniqueId";
+    case "parameter_fingerprint":
+      return "parameter fingerprint";
+    case "topology_signature":
+      return "topology signature";
+    case "output_path_signature":
+      return "output path signature";
+    default:
+      return "not resolved";
+  }
+};
+
 const collectConnectedNodeIds = (seedNodeIds: string[], edges: TaskGraphEdge[]) => {
   const adjacency = new Map<string, string[]>();
   for (const edge of edges) {
@@ -792,6 +845,16 @@ export const RunDetailPage = () => {
                       changed from previous success
                     </span>
                   ) : null}
+                  {selectedCompare ? (
+                    <span
+                      className={cn(
+                        "rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]",
+                        compareResolutionTone(selectedCompare),
+                      )}
+                    >
+                      {formatCompareResolutionLabel(selectedCompare)}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="grid gap-4 xl:grid-cols-2">
                   <CodeBlock
@@ -834,6 +897,29 @@ export const RunDetailPage = () => {
                   <div className="text-sm font-semibold text-slate-950">
                     Previous-success compare
                   </div>
+                  {selectedCompare ? (
+                    <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+                      <div className="font-semibold text-slate-950">
+                        {selectedCompare.diff.compareResolution.message}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-3 text-xs uppercase tracking-[0.16em] text-slate-500">
+                        <span>status {selectedCompare.diff.compareResolution.status}</span>
+                        <span>
+                          strategy{" "}
+                          {formatCompareStrategyLabel(
+                            selectedCompare.diff.compareResolution.strategy,
+                          )}
+                        </span>
+                        <span>
+                          candidates{" "}
+                          {
+                            selectedCompare.diff.compareResolution.sameTaskNameCandidateTaskNodeIds
+                              .length
+                          }
+                        </span>
+                      </div>
+                    </div>
+                  ) : null}
                   <CodeBlock value={selectedCompare ?? { previous: null, diff: {} }} />
                 </div>
               </div>

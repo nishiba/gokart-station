@@ -58,6 +58,7 @@ export const adapterRunRequestSchema = z.object({
   envSourcePath: filePathSchema.nullable().optional(),
   schedulerBaseUrl: z.string().url().nullable().optional(),
   configValues: stringRecordSchema,
+  configMaskedKeys: z.array(nonEmptyStringSchema),
   envValues: stringRecordSchema,
   envMaskedKeys: z.array(nonEmptyStringSchema),
   spec: runSpecSchema.extend({

@@ -6,6 +6,8 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/app";
+import { removeDirectoryWithRetries } from "./helpers/cleanup";
+import { resolveSampleProjectPythonExecutable } from "./helpers/sample-project";
 
 const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -100,7 +102,7 @@ test("forced adapter termination is cleaned up without leaving a zombie process"
         connection: {
           accessMode: "operator",
           projectRootDir: fixture.targetProjectDir,
-          pythonExecutable: "python3",
+          pythonExecutable: resolveSampleProjectPythonExecutable(),
           entrypointPath: "main.py",
           workspaceDirectory: fixture.workspaceDirectory,
           schedulerBaseUrl: null,
@@ -143,9 +145,6 @@ test("forced adapter termination is cleaned up without leaving a zombie process"
     await waitForPidToDisappear(runningRun.adapterPid);
   } finally {
     await app.close();
-    await fs.rm(fixture.tempRootDir, {
-      recursive: true,
-      force: true,
-    });
+    await removeDirectoryWithRetries(fixture.tempRootDir);
   }
 });

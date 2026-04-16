@@ -24,7 +24,7 @@ Example layout:
 ```text
 apps/web        React + Vite UI
 apps/agent      Fastify control plane
-apps/py_adapter Python adapter scaffold
+apps/py_adapter Python adapter for real gokart / Luigi execution
 packages/shared Shared domain types and zod schemas
 prisma/         Prisma schema backed by SQLite
 ```
@@ -57,20 +57,34 @@ pnpm --filter agent dev
 
 ## Sample Project Quickstart
 
-`examples/sample_gokart_project` is the release fixture for smoke tests and integration tests.
+`examples/sample_gokart_project` is a minimal real gokart / Luigi target project used by the smoke and integration checks. For `operator` flows, copy it to a directory outside this repo so the station repo and target repo stay independent.
 
-1. Clone `gokart-station` and keep your target gokart project in a separate directory.
+1. Clone `gokart-station`.
 2. Run `pnpm install`.
-3. Start the station services with `pnpm --filter agent dev` and `pnpm --filter web dev`.
-4. Use `examples/sample_gokart_project` as the target repo and point `workspaceDirectory` to a separate writable directory outside the station repo.
-5. In `observer`, register only the workspace directory and inspect runs, lineage, artifacts, raw payloads, files, watch events, and support bundles in read-only mode.
-6. In `operator`, also provide `projectRootDir`, `pythonExecutable`, and `entrypointPath` (`main.py` for the sample) and then validate, start the scheduler, create a run, stop or rerun it, and inspect the resulting graph / lineage / artifacts.
-
-Release-oriented verification:
+3. Prepare a separate sample target repo and workspace:
 
 ```bash
-pnpm release:check
+cp -R examples/sample_gokart_project ../sample-gokart-project
+python3 -m venv ../sample-gokart-project/.venv
+../sample-gokart-project/.venv/bin/pip install -r ../sample-gokart-project/requirements.txt
+mkdir -p ../sample-gokart-workspace
 ```
+
+4. Start the station services with `pnpm --filter agent dev` and `pnpm --filter web dev`.
+5. In `observer`, register only `workspaceDirectory = ../sample-gokart-workspace` and inspect runs, lineage, artifacts, raw payloads, files, watch events, and support bundles in read-only mode.
+6. In `operator`, register `projectRootDir = ../sample-gokart-project`, `pythonExecutable = ../sample-gokart-project/.venv/bin/python`, `entrypointPath = main.py`, and `workspaceDirectory = ../sample-gokart-workspace`. Then validate, start the scheduler, create a run, stop or rerun it, and inspect the resulting graph / lineage / artifacts.
+7. Read [examples/sample_gokart_project/README.md](./examples/sample_gokart_project/README.md) for direct CLI runs and profile-driven behavior changes.
+
+## Support Bundle Safety
+
+Support bundles contain connection metadata, mode / capability / validation snapshots, scheduler state, and already-masked run payloads. Raw env/config profile values and profile source file contents are not exported.
+
+## Release Preflight
+
+1. Run `pnpm install`.
+2. Run `pnpm release:check`.
+3. Manually verify the copied sample project in both `observer` and `operator` with a separate workspace directory.
+4. On a release candidate machine, run one final `operator` smoke against a real `luigid`.
 
 `pnpm release:check` runs lint, typecheck, web build, agent integration tests, Python adapter tests, and Playwright web smoke tests. It requires a local environment that can bind localhost ports for the agent, web dev server, browser automation, and scheduler fixture.
 

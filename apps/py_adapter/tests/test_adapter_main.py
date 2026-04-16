@@ -15,6 +15,7 @@ from pathlib import Path
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SAMPLE_PROJECT_SOURCE_DIR = REPO_ROOT / "examples" / "sample_gokart_project"
+SAMPLE_PROJECT_PYTHON = REPO_ROOT / ".venv_sample" / "bin" / "python"
 
 
 def build_request(
@@ -38,12 +39,21 @@ def build_request(
         "accessMode": "operator",
         "projectRootDir": project_root_dir,
         "workspaceDirectory": workspace_directory,
-        "pythonExecutable": sys.executable,
+        "pythonExecutable": str(SAMPLE_PROJECT_PYTHON if SAMPLE_PROJECT_PYTHON.exists() else sys.executable),
         "entrypointPath": "main.py",
         "schedulerBaseUrl": None,
-        "configValues": {"sample_key": "value"},
-        "envValues": {"ENV_NAME": "value"},
-        "envMaskedKeys": ["SECRET_TOKEN"],
+        "configValues": {
+            "sample_gokart.message_suffix": "[config-profile]",
+            "sample_gokart.metadata_tag": "config-profile-tag",
+            "sample_gokart.uppercase_report": "true",
+            "sample_gokart.secret_note": "config-secret-note",
+        },
+        "configMaskedKeys": ["sample_gokart.secret_note"],
+        "envValues": {
+            "SAMPLE_GOKART_MESSAGE_PREFIX": "[env-profile] ",
+            "SAMPLE_GOKART_SECRET_TOKEN": "env-secret-token",
+        },
+        "envMaskedKeys": ["SAMPLE_GOKART_SECRET_TOKEN"],
         "spec": {
             "rootTaskName": root_task_name,
             "parameters": parameters,
@@ -97,6 +107,16 @@ class AdapterMainTests(unittest.TestCase):
 
             events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
             event_types = [event["type"] for event in events]
+            published_metadata_path = Path(
+                workspace_directory,
+                "published",
+                "2026-04-15-baseline-metadata.json",
+            )
+            report_path = Path(
+                workspace_directory,
+                "reports",
+                "2026-04-15-baseline-report.txt",
+            )
 
             self.assertIn("run.started", event_types)
             self.assertIn("scheduler.snapshot", event_types)
@@ -108,6 +128,45 @@ class AdapterMainTests(unittest.TestCase):
             self.assertIn("raw.task_info_table", event_types)
             self.assertEqual(events[0]["projectRootDir"], target_project_dir)
             self.assertEqual(events[-1]["type"], "run.finished")
+            scheduler_snapshot = next(
+                event for event in events if event["type"] == "scheduler.snapshot"
+            )
+            self.assertEqual(scheduler_snapshot["health"], "unknown")
+            self.assertEqual(scheduler_snapshot["raw"]["completeness"], "not_configured")
+            self.assertEqual(scheduler_snapshot["raw"]["snapshotSource"], "luigid_rpc")
+            self.assertTrue(published_metadata_path.exists())
+            self.assertTrue(report_path.exists())
+            self.assertTrue(
+                Path(
+                    workspace_directory,
+                    ".gokart-station",
+                    "adapter",
+                    "run_test",
+                    "task-info-tree.json",
+                ).exists()
+            )
+            self.assertTrue(
+                Path(
+                    workspace_directory,
+                    ".gokart-station",
+                    "adapter",
+                    "run_test",
+                    "task-info-table.json",
+                ).exists()
+            )
+
+            published_metadata = json.loads(published_metadata_path.read_text(encoding="utf-8"))
+            report_text = report_path.read_text(encoding="utf-8")
+            self.assertEqual(published_metadata["station_run_id"], "run_test")
+            self.assertEqual(published_metadata["station_project_id"], "project_test")
+            self.assertEqual(published_metadata["metadata_tag"], "config-profile-tag")
+            self.assertIn("MESSAGE=[ENV-PROFILE] HELLO FROM ADAPTER TEST[CONFIG-PROFILE]", report_text)
+            self.assertIn("METADATA_TAG=CONFIG-PROFILE-TAG", report_text)
+            self.assertNotIn("env-secret-token", completed.stdout)
+            self.assertNotIn("config-secret-note", completed.stdout)
+            self.assertNotIn("env-secret-token", completed.stderr)
+            self.assertNotIn("config-secret-note", completed.stderr)
+            self.assertIn("***MASKED***", completed.stdout)
         finally:
             shutil.rmtree(temp_root_dir, ignore_errors=True)
 
@@ -134,14 +193,17 @@ class AdapterMainTests(unittest.TestCase):
                 check=False,
             )
             os.unlink(spec_path)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
+            self.assertGreaterEqual(len(events), 3)
+            self.assertEqual(events[0]["type"], "run.started")
+            self.assertEqual(events[-1]["type"], "run.finished")
+            self.assertTrue(
+                Path(workspace_directory, "published", "2026-04-15-baseline-metadata.json").exists()
+            )
         finally:
             shutil.rmtree(temp_root_dir, ignore_errors=True)
-
-        self.assertEqual(completed.returncode, 0, completed.stderr)
-        events = [json.loads(line) for line in completed.stdout.splitlines() if line.strip()]
-        self.assertGreaterEqual(len(events), 3)
-        self.assertEqual(events[0]["type"], "run.started")
-        self.assertEqual(events[-1]["type"], "run.finished")
 
     def test_graceful_stop_signal_finishes_with_canceled(self) -> None:
         temp_root_dir, target_project_dir, workspace_directory = prepare_sample_project_copy()
@@ -177,7 +239,7 @@ class AdapterMainTests(unittest.TestCase):
                 if not line:
                     continue
                 first_lines.append(line)
-                if '"type": "task.status_changed"' in line and '"state": "RUNNING"' in line:
+                if '"type": "task.log"' in line or '"status": "running"' in line:
                     break
 
             process.send_signal(signal.SIGTERM)

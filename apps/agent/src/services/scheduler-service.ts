@@ -50,6 +50,43 @@ export type SchedulerServiceOptions = {
   stopProcessOnDispose?: boolean;
 };
 
+export type SchedulerStateSnapshot = {
+  schedulerBaseUrl: string | null;
+  health: SchedulerHealth;
+  activeTaskCount: number;
+  pendingTaskCount: number;
+  failedTaskCount: number;
+  workerCount: number;
+  capturedAt: string;
+  raw: unknown;
+};
+
+type SchedulerRpcRequest = {
+  endpointKey: "workers" | "runningTasks" | "batchRunningTasks" | "pendingTasks" | "failedTasks";
+  rpcMethod: "worker_list" | "task_list";
+  payload: Record<string, boolean | string>;
+};
+
+type SchedulerRpcResult =
+  | {
+      ok: true;
+      response: unknown;
+      raw: Record<string, unknown>;
+    }
+  | {
+      ok: false;
+      kind: "http_error" | "unreachable" | "malformed";
+      message: string;
+      raw: Record<string, unknown>;
+    };
+
+type SchedulerSnapshotError = {
+  endpoint: SchedulerRpcRequest["endpointKey"];
+  rpcMethod: SchedulerRpcRequest["rpcMethod"];
+  kind: "http_error" | "unreachable" | "malformed";
+  message: string;
+};
+
 const sleep = async (durationMs: number) =>
   new Promise<void>((resolve) => {
     setTimeout(resolve, durationMs);
@@ -70,6 +107,111 @@ const healthFromResponse = (statusCode: number): SchedulerHealth => {
   }
 
   return "healthy";
+};
+
+const schedulerSnapshotRpcRequests: SchedulerRpcRequest[] = [
+  {
+    endpointKey: "workers",
+    rpcMethod: "worker_list",
+    payload: { include_running: true },
+  },
+  {
+    endpointKey: "runningTasks",
+    rpcMethod: "task_list",
+    payload: { status: "RUNNING", limit: false },
+  },
+  {
+    endpointKey: "batchRunningTasks",
+    rpcMethod: "task_list",
+    payload: { status: "BATCH_RUNNING", limit: false },
+  },
+  {
+    endpointKey: "pendingTasks",
+    rpcMethod: "task_list",
+    payload: { status: "PENDING", limit: false },
+  },
+  {
+    endpointKey: "failedTasks",
+    rpcMethod: "task_list",
+    payload: { status: "FAILED", limit: false },
+  },
+];
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+};
+
+const countWorkers = (response: unknown) => {
+  if (!Array.isArray(response)) {
+    throw new Error("worker_list response must be an array.");
+  }
+
+  return response.length;
+};
+
+const countTasks = (response: unknown) => {
+  if (!isRecord(response)) {
+    throw new Error("task_list response must be an object.");
+  }
+
+  const keys = Object.keys(response);
+  if (
+    keys.length === 1 &&
+    keys[0] === "num_tasks" &&
+    typeof response.num_tasks === "number" &&
+    Number.isFinite(response.num_tasks)
+  ) {
+    return Math.max(Math.trunc(response.num_tasks), 0);
+  }
+
+  return keys.length;
+};
+
+const resolveSnapshotState = (input: {
+  probeHealth: SchedulerHealth;
+  successfulEndpoints: number;
+  totalEndpoints: number;
+  errorKinds: string[];
+}) => {
+  if (input.successfulEndpoints === 0) {
+    if (input.probeHealth === "unreachable" || input.errorKinds.includes("unreachable")) {
+      return {
+        health: "unreachable" as const,
+        completeness: "unavailable" as const,
+      };
+    }
+
+    if (input.errorKinds.length > 0 && input.errorKinds.every((kind) => kind === "malformed")) {
+      return {
+        health: "degraded" as const,
+        completeness: "malformed" as const,
+      };
+    }
+
+    return {
+      health: "degraded" as const,
+      completeness: "unavailable" as const,
+    };
+  }
+
+  if (input.successfulEndpoints < input.totalEndpoints) {
+    return {
+      health: "partial" as const,
+      completeness: "partial" as const,
+    };
+  }
+
+  if (input.probeHealth === "degraded") {
+    return {
+      health: "degraded" as const,
+      completeness: "complete" as const,
+    };
+  }
+
+  return {
+    health: "healthy" as const,
+    completeness: "complete" as const,
+  };
 };
 
 export class SchedulerService {
@@ -158,6 +300,133 @@ export class SchedulerService {
         portConflict,
         isReachable: probeResult.isReachable,
       }),
+    };
+  }
+
+  async getSnapshot(schedulerBaseUrl?: string | null): Promise<SchedulerStateSnapshot> {
+    if (!schedulerBaseUrl) {
+      return {
+        schedulerBaseUrl: null,
+        health: "unknown",
+        activeTaskCount: 0,
+        pendingTaskCount: 0,
+        failedTaskCount: 0,
+        workerCount: 0,
+        capturedAt: new Date().toISOString(),
+        raw: {
+          schedulerBaseUrl: null,
+          snapshotSource: "luigid_rpc",
+          completeness: "not_configured",
+          counts: {
+            running: 0,
+            batchRunning: 0,
+            active: 0,
+            pending: 0,
+            failed: 0,
+            workers: 0,
+          },
+          healthProbe: {
+            status: "not_configured",
+            reason: "schedulerBaseUrl is not configured.",
+          },
+          endpoints: {},
+          errors: [],
+        },
+      };
+    }
+
+    const target = this.resolveTarget(schedulerBaseUrl);
+    const capturedAt = new Date().toISOString();
+    const probeResult = await this.probeScheduler(target.schedulerBaseUrl);
+    const endpointPayloads: Record<string, unknown> = {};
+    const errors: SchedulerSnapshotError[] = [];
+    const counts = {
+      running: 0,
+      batchRunning: 0,
+      active: 0,
+      pending: 0,
+      failed: 0,
+      workers: 0,
+    };
+    let successfulEndpoints = 0;
+
+    for (const request of schedulerSnapshotRpcRequests) {
+      const result = await this.fetchSchedulerRpc(
+        target.schedulerBaseUrl,
+        request.rpcMethod,
+        request.payload,
+      );
+      endpointPayloads[request.endpointKey] = result.raw;
+
+      if (!result.ok) {
+        errors.push({
+          endpoint: request.endpointKey,
+          rpcMethod: request.rpcMethod,
+          kind: result.kind,
+          message: result.message,
+        });
+        continue;
+      }
+
+      try {
+        if (request.endpointKey === "workers") {
+          counts.workers = countWorkers(result.response);
+        } else {
+          const taskCount = countTasks(result.response);
+          if (request.endpointKey === "runningTasks") {
+            counts.running = taskCount;
+          } else if (request.endpointKey === "batchRunningTasks") {
+            counts.batchRunning = taskCount;
+          } else if (request.endpointKey === "pendingTasks") {
+            counts.pending = taskCount;
+          } else if (request.endpointKey === "failedTasks") {
+            counts.failed = taskCount;
+          }
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Malformed scheduler payload.";
+        errors.push({
+          endpoint: request.endpointKey,
+          rpcMethod: request.rpcMethod,
+          kind: "malformed",
+          message,
+        });
+        endpointPayloads[request.endpointKey] = {
+          ...result.raw,
+          malformed: true,
+          message,
+        };
+        continue;
+      }
+
+      successfulEndpoints += 1;
+    }
+
+    counts.active = counts.running + counts.batchRunning;
+    const snapshotState = resolveSnapshotState({
+      probeHealth: probeResult.health,
+      successfulEndpoints,
+      totalEndpoints: schedulerSnapshotRpcRequests.length,
+      errorKinds: errors.map((error) => error.kind),
+    });
+
+    return {
+      schedulerBaseUrl: target.schedulerBaseUrl,
+      health: snapshotState.health,
+      activeTaskCount: counts.active,
+      pendingTaskCount: counts.pending,
+      failedTaskCount: counts.failed,
+      workerCount: counts.workers,
+      capturedAt,
+      raw: {
+        schedulerBaseUrl: target.schedulerBaseUrl,
+        snapshotSource: "luigid_rpc",
+        completeness: snapshotState.completeness,
+        counts,
+        healthProbe: probeResult.raw,
+        endpoints: endpointPayloads,
+        errors,
+      },
     };
   }
 
@@ -341,15 +610,109 @@ export class SchedulerService {
         method: "GET",
         signal: AbortSignal.timeout(this.healthTimeoutMs),
       });
+      const body = await response.text();
 
       return {
         health: healthFromResponse(response.status),
         isReachable: true,
+        raw: {
+          url: schedulerBaseUrl,
+          statusCode: response.status,
+          bodyPreview: body.slice(0, 512),
+        },
       };
-    } catch {
+    } catch (error) {
       return {
         health: "unreachable" as const,
         isReachable: false,
+        raw: {
+          url: schedulerBaseUrl,
+          error: error instanceof Error ? error.message : String(error),
+          errorType: error instanceof Error ? error.name : "Error",
+        },
+      };
+    }
+  }
+
+  private async fetchSchedulerRpc(
+    schedulerBaseUrl: string,
+    rpcMethod: SchedulerRpcRequest["rpcMethod"],
+    payload: SchedulerRpcRequest["payload"],
+  ): Promise<SchedulerRpcResult> {
+    const endpointUrl = new URL(`${schedulerBaseUrl}/api/${rpcMethod}`);
+    endpointUrl.searchParams.set("data", JSON.stringify(payload));
+
+    try {
+      const response = await fetch(endpointUrl, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.healthTimeoutMs),
+      });
+      const body = await response.text();
+
+      if (!response.ok) {
+        return {
+          ok: false,
+          kind: "http_error",
+          message: `HTTP ${response.status} from ${endpointUrl.toString()}`,
+          raw: {
+            url: endpointUrl.toString(),
+            statusCode: response.status,
+            bodyPreview: body.slice(0, 512),
+          },
+        };
+      }
+
+      let payloadWrapper: unknown;
+      try {
+        payloadWrapper = JSON.parse(body) as unknown;
+      } catch (error) {
+        return {
+          ok: false,
+          kind: "malformed",
+          message:
+            error instanceof Error
+              ? `Malformed JSON payload from ${endpointUrl.toString()}: ${error.message}`
+              : `Malformed JSON payload from ${endpointUrl.toString()}.`,
+          raw: {
+            url: endpointUrl.toString(),
+            statusCode: response.status,
+            bodyPreview: body.slice(0, 512),
+          },
+        };
+      }
+
+      if (!isRecord(payloadWrapper) || !("response" in payloadWrapper)) {
+        return {
+          ok: false,
+          kind: "malformed",
+          message: `Scheduler RPC payload from ${endpointUrl.toString()} does not include response.`,
+          raw: {
+            url: endpointUrl.toString(),
+            statusCode: response.status,
+            body: payloadWrapper,
+          },
+        };
+      }
+
+      return {
+        ok: true,
+        response: payloadWrapper.response,
+        raw: {
+          url: endpointUrl.toString(),
+          statusCode: response.status,
+          response: payloadWrapper.response,
+        },
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        kind: "unreachable",
+        message: error instanceof Error ? error.message : String(error),
+        raw: {
+          url: endpointUrl.toString(),
+          error: error instanceof Error ? error.message : String(error),
+          errorType: error instanceof Error ? error.name : "Error",
+        },
       };
     }
   }

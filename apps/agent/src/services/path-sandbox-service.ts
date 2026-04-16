@@ -28,6 +28,23 @@ const resolveExistingRealPath = async (targetPath: string) => {
   return fs.realpath(targetPath);
 };
 
+const findFirstSymlinkPath = async (targetPath: string) => {
+  const absolutePath = path.resolve(targetPath);
+  const { root } = path.parse(absolutePath);
+  const relativeSegments = absolutePath.slice(root.length).split(path.sep).filter(Boolean);
+  let currentPath = root;
+
+  for (const segment of relativeSegments) {
+    currentPath = path.join(currentPath, segment);
+    const stats = await fs.lstat(currentPath);
+    if (stats.isSymbolicLink()) {
+      return currentPath;
+    }
+  }
+
+  return null;
+};
+
 const resolveExecutableFromPath = async (executableName: string) => {
   const pathEntries = (process.env.PATH ?? "")
     .split(path.delimiter)
@@ -71,12 +88,22 @@ const createIssue = (
       };
 };
 
+const buildDirectorySymlinkMessage = (field: string, allowByExplicitFlag = false) => {
+  if (field === "workspaceDirectory" && allowByExplicitFlag) {
+    return "workspaceDirectory must not use symlinks unless allowWorkspaceDirectorySymlink is true.";
+  }
+
+  return `${field} must not use symlinks.`;
+};
+
 export class PathSandboxService {
   async resolveScopes(connection: ProjectConnection): Promise<SandboxScope[]> {
     const directoryScopes: SandboxScope[] = [];
     const fileScopes: SandboxScope[] = [];
 
-    const workspaceScope = await this.resolveScope("workspace", connection.workspaceDirectory);
+    const workspaceScope = await this.resolveScope("workspace", connection.workspaceDirectory, {
+      allowSymlink: connection.allowWorkspaceDirectorySymlink ?? false,
+    });
     if (workspaceScope) {
       directoryScopes.push(workspaceScope);
     }
@@ -118,7 +145,9 @@ export class PathSandboxService {
   async validateConnection(connection: ProjectConnection) {
     const issues: ValidationIssue[] = [];
 
-    await this.validateDirectory(connection.workspaceDirectory, "workspaceDirectory", issues);
+    await this.validateDirectory(connection.workspaceDirectory, "workspaceDirectory", issues, {
+      allowSymlink: connection.allowWorkspaceDirectorySymlink ?? false,
+    });
     if (connection.schedulerBaseUrl) {
       this.validateSchedulerBaseUrl(connection.schedulerBaseUrl, issues);
     }
@@ -181,9 +210,29 @@ export class PathSandboxService {
     return issues;
   }
 
-  private async validateDirectory(targetPath: string, field: string, issues: ValidationIssue[]) {
+  private async validateDirectory(
+    targetPath: string,
+    field: string,
+    issues: ValidationIssue[],
+    options: {
+      allowSymlink?: boolean;
+    } = {},
+  ) {
     if (!(await pathExists(targetPath))) {
       issues.push(createIssue("path_not_found", `${field} does not exist.`, "error", field));
+      return;
+    }
+
+    const symlinkPath = await findFirstSymlinkPath(targetPath);
+    if (symlinkPath && !options.allowSymlink) {
+      issues.push(
+        createIssue(
+          "symlink_not_allowed",
+          buildDirectorySymlinkMessage(field, field === "workspaceDirectory"),
+          "error",
+          field,
+        ),
+      );
       return;
     }
 
@@ -201,10 +250,10 @@ export class PathSandboxService {
       return;
     }
 
-    const stats = await fs.lstat(targetPath);
-    if (stats.isSymbolicLink()) {
+    const symlinkPath = await findFirstSymlinkPath(targetPath);
+    if (symlinkPath) {
       issues.push(
-        createIssue("symlink_not_allowed", `${field} must not be a symlink.`, "error", field),
+        createIssue("symlink_not_allowed", `${field} must not use symlinks.`, "error", field),
       );
       return;
     }
@@ -354,13 +403,16 @@ export class PathSandboxService {
   private async resolveScope(
     key: SandboxScopeKey,
     targetPath: string,
+    options: {
+      allowSymlink?: boolean;
+    } = {},
   ): Promise<SandboxScope | null> {
     if (!(await pathExists(targetPath))) {
       return null;
     }
 
-    const stats = await fs.lstat(targetPath);
-    if (stats.isSymbolicLink() && (key === "luigiConfigPath" || key === "envSourcePath")) {
+    const symlinkPath = await findFirstSymlinkPath(targetPath);
+    if (symlinkPath && !options.allowSymlink) {
       return null;
     }
 

@@ -34,6 +34,12 @@ Node / Python adapter ともに、project root と workspace の sandbox を守�
 - 任意 shell 展開
 - observer mode での projectRootDir 前提操作
 
+symlink 方針:
+- `projectRootDir` は symlink 禁止
+- `workspaceDirectory` は `allowWorkspaceDirectorySymlink = true` の明示時だけ許可し、default は禁止
+- `luigiConfigPath` / `envSourcePath` は symlink 禁止
+- watcher / file tree / support bundle は上記 policy を満たした sandbox scope だけを対象にする
+
 ## Process 安全性
 
 - process group 単位で管理する
@@ -48,15 +54,17 @@ Node / Python adapter ともに、project root と workspace の sandbox を守�
 
 - stdout / stderr は行単位保存
 - env profile の masked key はログに出さない
+- config / env profile の masked key は adapter が stdout / stderr / raw task info を保存前に再マスクする
 - raw stderr を保持する
 - 巨大ログは `limit` / `offset` ベースでページングする
-- support bundle では secret を再マスクする
+- support bundle は masked 済み payload を収集し、bundle 生成時に secret の平文を新たに書き出さない
 
 ## Config / Env 編集
 
 - operator / managed のみ許可する
 - 保存前 parse validation を実施する
 - env の sensitive key は mask する
+- config profile は `section.option` key を runtime 時に temporary Luigi config へ materialize する
 - profile resolve 結果を preview する
 - observer mode では read-only とする
 
@@ -66,6 +74,8 @@ watch event は補助である。
 run state は scheduler / adapter event を優先する。
 
 - watcher は sandbox 内の scope のみを対象にする
+- native filesystem event を優先し、snapshot scan は fallback に限定する
+- fallback snapshot scan は長めの interval と backoff を持たせる
 - symlink は follow しない
 - project 削除 / app close 時に watcher cleanup を行う
 
@@ -86,11 +96,16 @@ run state は scheduler / adapter event を優先する。
 - project connection metadata
 - run metadata json
 - logs txt
+- scheduler health json
 - scheduler snapshot json
 - task info raw
 - artifact manifest json
 - validation result
 - mode / capability snapshot
+
+含めないもの:
+- env / config profile の生値
+- env source file / config source file の中身
 
 MVP では station runtime 配下に support bundle directory を作り、その中の `bundle.json` を返してよい。  
 archive packaging は後段で追加してよいが、bundle 内容の欠落は不可とする。

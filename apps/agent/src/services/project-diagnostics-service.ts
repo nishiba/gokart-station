@@ -80,13 +80,15 @@ export class ProjectDiagnosticsService {
     const project = await this.projectService.requireProject(projectId);
     const validation = await this.projectService.validateProject(projectId);
     const capabilitySnapshot = await this.capabilitySnapshotRepository.getLatest(projectId);
-    const [fileTree, watchEvents, recentRuns, schedulerHealth, schedulerLogs] = await Promise.all([
-      this.getFilesTreeForConnection(project.connection),
-      this.watchEventRepository.listByProjectId(projectId, 200),
-      this.runService.listRuns(projectId),
-      this.schedulerService.getHealth(project.connection.schedulerBaseUrl),
-      this.schedulerService.getLogs(50),
-    ]);
+    const [fileTree, watchEvents, recentRuns, schedulerHealth, schedulerSnapshot, schedulerLogs] =
+      await Promise.all([
+        this.getFilesTreeForConnection(project.connection),
+        this.watchEventRepository.listByProjectId(projectId, 200),
+        this.runService.listRuns(projectId),
+        this.schedulerService.getHealth(project.connection.schedulerBaseUrl),
+        this.schedulerService.getSnapshot(project.connection.schedulerBaseUrl),
+        this.schedulerService.getLogs(50),
+      ]);
 
     const bundleId = `${Date.now()}-${randomUUID()}`;
     const bundleDirectory = path.join(this.supportBundleRuntimeDirectory, projectId, bundleId);
@@ -102,6 +104,10 @@ export class ProjectDiagnosticsService {
       recentRuns.map(summarizeRun),
     );
     await this.writeJsonFile(path.join(bundleDirectory, "scheduler-health.json"), schedulerHealth);
+    await this.writeJsonFile(
+      path.join(bundleDirectory, "scheduler-snapshot.json"),
+      schedulerSnapshot,
+    );
     await this.writeJsonFile(path.join(bundleDirectory, "scheduler-logs.json"), schedulerLogs);
 
     const latestRun = recentRuns[0] ?? null;
@@ -131,6 +137,7 @@ export class ProjectDiagnosticsService {
       recentRunCount: recentRuns.length,
       scheduler: {
         health: schedulerHealth,
+        snapshot: schedulerSnapshot,
         logLineCount: schedulerLogs.lines.length,
       },
       files: {
@@ -139,6 +146,7 @@ export class ProjectDiagnosticsService {
         watchEvents: "watch-events.json",
         recentRuns: "recent-runs.json",
         schedulerHealth: "scheduler-health.json",
+        schedulerSnapshot: "scheduler-snapshot.json",
         schedulerLogs: "scheduler-logs.json",
       },
       latestRun: latestRunManifest,

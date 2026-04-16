@@ -30,7 +30,7 @@ export type TaskState =
   | "UNKNOWN"
   | "CANCELED";
 
-export type SchedulerHealth = "unknown" | "healthy" | "degraded" | "unreachable";
+export type SchedulerHealth = "unknown" | "healthy" | "partial" | "degraded" | "unreachable";
 
 export type StopMode = "graceful" | "force";
 
@@ -102,6 +102,7 @@ export interface ProjectConnection {
   pythonExecutable?: string | null;
   entrypointPath?: string | null;
   workspaceDirectory: string;
+  allowWorkspaceDirectorySymlink?: boolean;
   luigiConfigPath?: string | null;
   envSourcePath?: string | null;
   schedulerBaseUrl?: string | null;
@@ -165,6 +166,7 @@ export interface AdapterRunRequest {
   envSourcePath?: string | null | undefined;
   schedulerBaseUrl?: string | null | undefined;
   configValues: Record<string, string>;
+  configMaskedKeys: string[];
   envValues: Record<string, string>;
   envMaskedKeys: string[];
   spec: RunSpec;
@@ -217,6 +219,42 @@ export interface TaskLineageNode {
   downstreamNodeIds: TaskNodeId[];
   createdAt: string;
   updatedAt: string;
+}
+
+export type CompareResolutionStatus =
+  | "matched"
+  | "no_previous_success"
+  | "no_candidate"
+  | "ambiguous";
+
+export type CompareResolutionStrategy =
+  | "task_name_unique_candidate"
+  | "unique_id"
+  | "parameter_fingerprint"
+  | "topology_signature"
+  | "output_path_signature";
+
+export interface CompareResolutionAttempt {
+  strategy: CompareResolutionStrategy;
+  candidateTaskNodeIds: TaskNodeId[];
+  candidateCount: number;
+}
+
+export interface CompareResolutionMetadata {
+  status: CompareResolutionStatus;
+  strategy?: CompareResolutionStrategy | null;
+  previousRunId?: RunId | null;
+  matchedTaskNodeId?: TaskNodeId | null;
+  sameTaskNameCandidateTaskNodeIds: TaskNodeId[];
+  attempts: CompareResolutionAttempt[];
+  evidence: {
+    currentUniqueId: string;
+    currentParameterFingerprint: string;
+    currentUpstreamSignature: string;
+    currentDownstreamSignature: string;
+    currentOutputPathSignature: string;
+  };
+  message: string;
 }
 
 export interface TaskGraph {

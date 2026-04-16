@@ -562,6 +562,14 @@ export const ProjectWorkspacePage = () => {
                     <dd>{project.connection.workspaceDirectory}</dd>
                   </div>
                   <div>
+                    <dt className="font-semibold text-slate-950">Workspace symlink</dt>
+                    <dd>
+                      {project.connection.allowWorkspaceDirectorySymlink
+                        ? "Explicitly allowed"
+                        : "Rejected by default"}
+                    </dd>
+                  </div>
+                  <div>
                     <dt className="font-semibold text-slate-950">Target root</dt>
                     <dd>{project.connection.projectRootDir ?? "Observer workspace only"}</dd>
                   </div>

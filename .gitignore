@@ -11,6 +11,7 @@ prisma/dev.db-journal
 .gokart-station
 
 apps/py_adapter/.venv
+.venv_sample
 apps/py_adapter/**/*.egg-info
-apps/py_adapter/**/__pycache__
-apps/py_adapter/**/*.pyc
+**/__pycache__
+**/*.pyc

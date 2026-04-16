@@ -9,6 +9,7 @@
 
 - [ ] station repo と target repo が別レポジトリ / 別ディレクトリでも登録できる
 - [ ] repo root `README.md` と `examples/sample_gokart_project/README.md` を読めば、第三者が sample project で observer / operator の両導線を再現できる
+- [ ] `examples/sample_gokart_project/README.md` に maintainer ローカル絶対パスが残っていない
 - [ ] `AccessMode` の語彙が `observer | operator | managed` で統一されている
 - [ ] `CapabilitySet` が mode と接続 validate 結果から導出される前提で docs が整合している
 - [ ] workspace-only 接続は `accessMode = observer` として扱われる
@@ -72,6 +73,7 @@
 - [ ] support bundle を export できる
 - [ ] support bundle に mode / capability / validation snapshot が入る
 - [ ] support bundle content を automated test で確認できる
+- [ ] support bundle に masked secret value の平文が残らない
 - [ ] 巨大ログをページング取得できる
 
 ### Safety
@@ -90,6 +92,7 @@
 ## Release Preflight
 
 - [ ] `pnpm install`
+- [ ] sample project 用 Python environment 準備手順が `README.md` と `examples/sample_gokart_project/README.md` にある
 - [ ] `pnpm release:check`
 - [ ] sample project を separate repo / separate workspace 前提で observer / operator の両方で手動確認できる
 - [ ] release candidate では real `luigid` を使った operator smoke を 1 回通す
@@ -98,4 +101,5 @@
 
 - [ ] file tree は metadata-only であり、直接 text preview / edit は含まない
 - [ ] support bundle export は single archive ではなく runtime directory + `bundle.json` manifest を返す
+- [ ] support bundle は metadata と masked 済み payload を返し、profile source file の中身は含めない
 - [ ] automated integration / E2E は localhost port bind が可能な環境を前提とする

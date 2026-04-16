@@ -5,6 +5,12 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/app";
+import { removeDirectoryWithRetries } from "./helpers/cleanup";
+import {
+  reserveLocalhostPort,
+  resolveSampleProjectLuigidExecutable,
+  resolveSampleProjectPythonExecutable,
+} from "./helpers/sample-project";
 
 const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -36,6 +42,7 @@ const prepareSampleProjectFixture = async () => {
 const createOperatorProject = async (
   app: Awaited<ReturnType<typeof buildApp>>,
   fixture: Awaited<ReturnType<typeof prepareSampleProjectFixture>>,
+  schedulerBaseUrl: string,
 ) => {
   const response = await app.inject({
     method: "POST",
@@ -45,10 +52,10 @@ const createOperatorProject = async (
       connection: {
         accessMode: "operator",
         projectRootDir: fixture.targetProjectDir,
-        pythonExecutable: "python3",
+        pythonExecutable: resolveSampleProjectPythonExecutable(),
         entrypointPath: "main.py",
         workspaceDirectory: fixture.workspaceDirectory,
-        schedulerBaseUrl: null,
+        schedulerBaseUrl,
       },
     },
   });
@@ -104,11 +111,28 @@ const waitForRunStatus = async (
 
 test("graph, lineage, artifacts, raw payloads, and previous-success compare are available", async () => {
   const fixture = await prepareSampleProjectFixture();
+  const schedulerPort = await reserveLocalhostPort();
   const databaseUrl = `file:${path.join(fixture.tempRootDir, "test.db")}`;
-  const app = await buildApp({ databaseUrl });
+  const app = await buildApp({
+    databaseUrl,
+    scheduler: {
+      executable: resolveSampleProjectLuigidExecutable(),
+      runtimeDirectory: path.join(fixture.tempRootDir, "scheduler-runtime"),
+      stopProcessOnDispose: true,
+    },
+  });
 
   try {
-    const project = await createOperatorProject(app, fixture);
+    const project = await createOperatorProject(app, fixture, `http://127.0.0.1:${schedulerPort}`);
+
+    const schedulerStartResponse = await app.inject({
+      method: "POST",
+      url: "/api/scheduler/start",
+      payload: {
+        projectId: project.id,
+      },
+    });
+    assert.equal(schedulerStartResponse.statusCode, 200);
 
     const baselineRunResponse = await app.inject({
       method: "POST",
@@ -269,6 +293,31 @@ test("graph, lineage, artifacts, raw payloads, and previous-success compare are 
     const rawScheduler = rawSchedulerResponse.json();
     assert.ok(Array.isArray(rawScheduler.raw));
     assert.ok(rawScheduler.raw.length >= 1);
+    assert.ok(
+      rawScheduler.raw.some(
+        (snapshot: {
+          workerCount: number;
+          activeTaskCount: number;
+          pendingTaskCount: number;
+          failedTaskCount: number;
+          raw: { completeness?: string };
+        }) =>
+          snapshot.workerCount >= 1 ||
+          snapshot.activeTaskCount > 0 ||
+          snapshot.pendingTaskCount > 0 ||
+          snapshot.failedTaskCount > 0,
+      ),
+    );
+    assert.ok(
+      rawScheduler.raw.every(
+        (snapshot: {
+          raw: { completeness?: string; snapshotSource?: string; healthProbe?: unknown };
+        }) =>
+          typeof snapshot.raw?.completeness === "string" &&
+          snapshot.raw?.snapshotSource === "luigid_rpc" &&
+          snapshot.raw?.healthProbe !== undefined,
+      ),
+    );
 
     const rawAdapterEventsResponse = await app.inject({
       method: "GET",
@@ -341,9 +390,6 @@ test("graph, lineage, artifacts, raw payloads, and previous-success compare are 
     );
   } finally {
     await app.close();
-    await fs.rm(fixture.tempRootDir, {
-      recursive: true,
-      force: true,
-    });
+    await removeDirectoryWithRetries(fixture.tempRootDir);
   }
 });

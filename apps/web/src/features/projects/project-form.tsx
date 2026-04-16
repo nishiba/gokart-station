@@ -11,6 +11,7 @@ export type ProjectFormValues = {
   pythonExecutable: string;
   entrypointPath: string;
   workspaceDirectory: string;
+  allowWorkspaceDirectorySymlink: boolean;
   luigiConfigPath: string;
   envSourcePath: string;
   schedulerBaseUrl: string;
@@ -25,6 +26,7 @@ export const emptyProjectFormValues: ProjectFormValues = {
   pythonExecutable: "",
   entrypointPath: "",
   workspaceDirectory: "",
+  allowWorkspaceDirectorySymlink: false,
   luigiConfigPath: "",
   envSourcePath: "",
   schedulerBaseUrl: "",
@@ -40,6 +42,7 @@ export const projectToFormValues = (project: ProjectRecord): ProjectFormValues =
     pythonExecutable: project.connection.pythonExecutable ?? "",
     entrypointPath: project.connection.entrypointPath ?? "",
     workspaceDirectory: project.connection.workspaceDirectory,
+    allowWorkspaceDirectorySymlink: project.connection.allowWorkspaceDirectorySymlink ?? false,
     luigiConfigPath: project.connection.luigiConfigPath ?? "",
     envSourcePath: project.connection.envSourcePath ?? "",
     schedulerBaseUrl: project.connection.schedulerBaseUrl ?? "",
@@ -54,6 +57,7 @@ export const projectFormValuesToRequest = (values: ProjectFormValues) => {
     connection: {
       accessMode: values.accessMode,
       workspaceDirectory: values.workspaceDirectory.trim(),
+      allowWorkspaceDirectorySymlink: values.allowWorkspaceDirectorySymlink,
       projectRootDir: values.projectRootDir.trim() || null,
       pythonExecutable: values.pythonExecutable.trim() || null,
       entrypointPath: values.entrypointPath.trim() || null,
@@ -159,6 +163,27 @@ export const ProjectForm = ({
           value={values.workspaceDirectory}
         />
       </div>
+
+      <label className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-950">
+        <input
+          checked={values.allowWorkspaceDirectorySymlink}
+          className="mt-1 h-4 w-4 rounded border-amber-300 text-amber-900"
+          onChange={(event) =>
+            setValues((current) => ({
+              ...current,
+              allowWorkspaceDirectorySymlink: event.target.checked,
+            }))
+          }
+          type="checkbox"
+        />
+        <span>
+          <span className="block font-semibold">Allow workspace symlink</span>
+          <span className="block text-amber-900/80">
+            Default is off. Enable only when the workspace root itself is a trusted symlinked
+            directory.
+          </span>
+        </span>
+      </label>
 
       <div className="grid gap-4 lg:grid-cols-2">
         <div className="space-y-2">

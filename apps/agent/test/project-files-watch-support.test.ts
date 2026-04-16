@@ -5,6 +5,8 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { buildApp } from "../src/app";
+import { removeDirectoryWithRetries } from "./helpers/cleanup";
+import { resolveSampleProjectPythonExecutable } from "./helpers/sample-project";
 
 const createTempDirectory = async (prefix: string) => {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -45,7 +47,7 @@ const createOperatorProject = async (
       connection: {
         accessMode: "operator",
         projectRootDir: fixture.targetProjectDir,
-        pythonExecutable: "python3",
+        pythonExecutable: resolveSampleProjectPythonExecutable(),
         entrypointPath: "main.py",
         workspaceDirectory: fixture.workspaceDirectory,
         schedulerBaseUrl: null,
@@ -160,7 +162,9 @@ test("project file tree, watch events, support bundle, and paged logs are availa
       supportBundleRuntimeDirectory,
     },
     projectWatch: {
-      pollIntervalMs: 50,
+      eventDebounceMs: 25,
+      fallbackPollIntervalMs: 10_000,
+      maxFallbackPollIntervalMs: 10_000,
     },
   });
 
@@ -172,12 +176,17 @@ test("project file tree, watch events, support bundle, and paged logs are availa
     });
 
     const watchedWorkspaceFilePath = path.join(fixture.workspaceDirectory, "manual-output.json");
+    const watchStartedAt = Date.now();
     await fs.writeFile(watchedWorkspaceFilePath, '{"ok":true}\n', "utf8");
     await fs.writeFile(watchedWorkspaceFilePath, '{"ok":false}\n', "utf8");
 
     const watchEvents = await waitForWatchEvents(app, operatorProject.id, (events) => {
       return events.some((event) => event.relativePath.endsWith("manual-output.json"));
     });
+    assert.ok(
+      Date.now() - watchStartedAt < 2_000,
+      "watch events should be delivered by native file events before polling fallback runs",
+    );
     assert.ok(watchEvents.some((event: { kind: string }) => event.kind === "add"));
 
     const fileTreeResponse = await app.inject({
@@ -223,6 +232,8 @@ test("project file tree, watch events, support bundle, and paged logs are availa
       project: { accessMode: string; capabilities: { canRun: boolean } };
       validation: { resolvedCapabilities: { canRun: boolean } };
       capabilitySnapshot: { schedulerHealth: string } | null;
+      scheduler: { snapshot: { health: string } };
+      files: { schedulerSnapshot: string };
       latestRun: { fileNames: string[] } | null;
     };
 
@@ -230,12 +241,11 @@ test("project file tree, watch events, support bundle, and paged logs are availa
     assert.equal(bundleManifest.project.capabilities.canRun, true);
     assert.equal(bundleManifest.validation.resolvedCapabilities.canRun, true);
     assert.ok(bundleManifest.capabilitySnapshot);
+    assert.equal(bundleManifest.files.schedulerSnapshot, "scheduler-snapshot.json");
+    assert.equal(bundleManifest.scheduler.snapshot.health, "unknown");
     assert.ok(bundleManifest.latestRun?.fileNames.includes("latest-run/logs.txt"));
   } finally {
     await app.close();
-    await fs.rm(fixture.tempRootDir, {
-      recursive: true,
-      force: true,
-    });
+    await removeDirectoryWithRetries(fixture.tempRootDir);
   }
 });

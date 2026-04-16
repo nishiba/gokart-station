@@ -1,181 +1,144 @@
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
-from gokart_station_adapter.models import AdapterRunRequest
+
+def load_task_info_json(path: Path | None) -> Any | None:
+    if path is None or not path.exists():
+        return None
+
+    return _read_json(path)
 
 
-def build_tasks(request: AdapterRunRequest) -> list[dict[str, Any]]:
-    parameters = _task_parameters(request)
-    task_plan = _task_plan_for_root_task(request.spec.root_task_name)
+def normalize_task_info_tree(raw_tree: Any) -> dict[str, Any] | None:
+    if not isinstance(raw_tree, dict):
+        return None
 
-    tasks: list[dict[str, Any]] = []
-    for task_name, upstream_task_names, downstream_task_names in task_plan:
-        outputs = [str(_task_output_path(request, task_name, parameters).resolve())]
-
-        tasks.append(
-            {
-                "taskName": task_name,
-                "uniqueId": _build_unique_id(task_name, parameters),
-                "state": "PENDING",
-                "parameters": dict(parameters),
-                "outputs": outputs,
-                "processingTimeSec": None,
-                "taskLog": {"entries": []},
-                "rerunReason": _build_rerun_reason(request),
-                "codeVersionHint": None,
-                "upstreamUniqueIds": [
-                    _build_unique_id(upstream_task_name, parameters)
-                    for upstream_task_name in upstream_task_names
-                ],
-                "downstreamUniqueIds": [
-                    _build_unique_id(downstream_task_name, parameters)
-                    for downstream_task_name in downstream_task_names
-                ],
-            }
-        )
-
-    return tasks
-
-
-def build_task_info_tree(tasks: list[dict[str, Any]]) -> dict[str, Any]:
-    if not tasks:
-        return {"tasks": []}
-
-    task_map = {task["uniqueId"]: task for task in tasks}
-    root_task = next(
-        (task for task in tasks if len(task["downstreamUniqueIds"]) == 0),
-        tasks[-1],
-    )
-
-    return _build_tree_node(root_task, task_map)
-
-
-def build_task_info_table(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [
-        {
-            "taskName": task["taskName"],
-            "uniqueId": task["uniqueId"],
-            "state": task["state"],
-            "parameters": task["parameters"],
-            "outputs": task["outputs"],
-            "processingTimeSec": task["processingTimeSec"],
-            "taskLog": task["taskLog"],
-            "rerunReason": task["rerunReason"],
-            "codeVersionHint": task["codeVersionHint"],
-            "upstreamUniqueIds": task["upstreamUniqueIds"],
-            "downstreamUniqueIds": task["downstreamUniqueIds"],
-        }
-        for task in tasks
-    ]
-
-
-def task_for_unique_id(tasks: list[dict[str, Any]], unique_id: str) -> dict[str, Any] | None:
-    return next((task for task in tasks if task["uniqueId"] == unique_id), None)
-
-
-def _build_tree_node(task: dict[str, Any], task_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {
-        "taskName": task["taskName"],
-        "uniqueId": task["uniqueId"],
-        "state": task["state"],
-        "parameters": task["parameters"],
-        "outputs": task["outputs"],
-        "processingTimeSec": task["processingTimeSec"],
-        "taskLog": task["taskLog"],
-        "rerunReason": task["rerunReason"],
-        "codeVersionHint": task["codeVersionHint"],
+        "taskName": _coerce_string(raw_tree.get("taskName"), "unknown"),
+        "uniqueId": _coerce_string(raw_tree.get("uniqueId"), "unknown"),
+        "state": _coerce_string(raw_tree.get("state"), "UNKNOWN"),
+        "parameters": _coerce_mapping(raw_tree.get("parameters")),
+        "outputs": _coerce_string_list(raw_tree.get("outputs")),
+        "processingTimeSec": _coerce_optional_float(raw_tree.get("processingTimeSec")),
+        "taskLog": _normalize_task_log(raw_tree.get("taskLog")),
+        "rerunReason": _coerce_optional_string(raw_tree.get("rerunReason")),
+        "codeVersionHint": _coerce_optional_string(raw_tree.get("codeVersionHint")),
         "children": [
-            _build_tree_node(task_map[unique_id], task_map)
-            for unique_id in task["upstreamUniqueIds"]
-            if unique_id in task_map
+            normalized_child
+            for child in _coerce_list(raw_tree.get("children"))
+            if (normalized_child := normalize_task_info_tree(child)) is not None
         ],
     }
 
 
-def _task_plan_for_root_task(root_task_name: str) -> list[tuple[str, list[str], list[str]]]:
-    if root_task_name == "PublishReport":
-        return [
-            ("PrepareInput", [], ["RenderReport"]),
-            ("RenderReport", ["PrepareInput"], ["PublishReport"]),
-            ("PublishReport", ["RenderReport"], []),
-        ]
+def normalize_task_info_table(raw_table: Any, rerun_reason: str | None = None) -> list[dict[str, Any]]:
+    normalized_entries: list[dict[str, Any]] = []
+    for raw_entry in _coerce_list(raw_table):
+        if not isinstance(raw_entry, dict):
+            continue
 
-    if root_task_name == "BrokenReport":
-        return [
-            ("PrepareInput", [], ["RenderReport"]),
-            ("RenderReport", ["PrepareInput"], ["BrokenReport"]),
-            ("BrokenReport", ["RenderReport"], []),
-        ]
+        task_name = _coerce_string(raw_entry.get("taskName"), "")
+        unique_id = _coerce_string(raw_entry.get("uniqueId"), "")
+        if task_name == "" or unique_id == "":
+            continue
 
-    if root_task_name == "ImmediateFailure":
-        return [("ImmediateFailure", [], [])]
+        normalized_entries.append(
+            {
+                "taskName": task_name,
+                "uniqueId": unique_id,
+                "state": _coerce_string(raw_entry.get("state"), "UNKNOWN"),
+                "parameters": _coerce_mapping(raw_entry.get("parameters")),
+                "outputs": _coerce_string_list(raw_entry.get("outputs")),
+                "processingTimeSec": _coerce_optional_float(raw_entry.get("processingTimeSec")),
+                "taskLog": _normalize_task_log(raw_entry.get("taskLog")),
+                "rerunReason": _coerce_optional_string(raw_entry.get("rerunReason"))
+                or rerun_reason,
+                "codeVersionHint": _coerce_optional_string(raw_entry.get("codeVersionHint")),
+                "upstreamUniqueIds": _coerce_string_list(raw_entry.get("upstreamUniqueIds")),
+                "downstreamUniqueIds": _coerce_string_list(raw_entry.get("downstreamUniqueIds")),
+            }
+        )
 
-    if root_task_name == "PartialFailureReport":
-        return [
-            ("PrepareInput", [], ["RenderReport"]),
-            ("RenderReport", ["PrepareInput"], ["PublishReport", "BrokenReport"]),
-            ("PublishReport", ["RenderReport"], ["PartialFailureReport"]),
-            ("BrokenReport", ["RenderReport"], ["PartialFailureReport"]),
-            ("PartialFailureReport", ["PublishReport", "BrokenReport"], []),
-        ]
-
-    return [(root_task_name, [], [])]
-
-
-def _task_parameters(request: AdapterRunRequest) -> dict[str, Any]:
-    return {
-        "message": request.spec.parameters.get("message", "hello from gokart-station"),
-        "report_date": request.spec.parameters.get("report_date", "2026-04-15"),
-        "rerun_token": request.spec.parameters.get("rerun_token", "baseline"),
-    }
+    return normalized_entries
 
 
-def _build_rerun_reason(request: AdapterRunRequest) -> str | None:
-    if request.spec.rerun_mode == "none":
+def build_rerun_reason(rerun_mode: str) -> str | None:
+    if rerun_mode == "none":
         return None
-
-    if request.spec.rerun_mode == "same_spec":
+    if rerun_mode == "same_spec":
         return "same_spec_manual"
-
-    return request.spec.rerun_mode
-
-
-def _task_output_path(
-    request: AdapterRunRequest,
-    task_name: str,
-    parameters: dict[str, Any],
-) -> Path:
-    workspace_root = Path(request.workspace_directory).expanduser().resolve()
-    report_date = str(parameters["report_date"])
-    rerun_token = str(parameters["rerun_token"])
-
-    if task_name == "PrepareInput":
-        return workspace_root / "prepare" / f"{report_date}-{rerun_token}-payload.json"
-
-    if task_name == "RenderReport":
-        return workspace_root / "reports" / f"{report_date}-{rerun_token}-report.txt"
-
-    if task_name == "PublishReport":
-        return workspace_root / "published" / f"{report_date}-{rerun_token}-metadata.json"
-
-    if task_name == "BrokenReport":
-        return workspace_root / "failed" / f"{report_date}-{rerun_token}-broken.json"
-
-    if task_name == "ImmediateFailure":
-        return workspace_root / "failed" / f"{report_date}-{rerun_token}-immediate.json"
-
-    if task_name == "PartialFailureReport":
-        return workspace_root / "partial" / f"{report_date}-{rerun_token}-summary.json"
-
-    safe_task_name = re.sub(r"[^a-zA-Z0-9_.-]+", "_", task_name)
-    return workspace_root / "misc" / f"{safe_task_name}-{rerun_token}.json"
+    return rerun_mode
 
 
-def _build_unique_id(task_name: str, parameters: dict[str, Any]) -> str:
-    report_date = str(parameters["report_date"])
-    rerun_token = str(parameters["rerun_token"])
-    raw_identifier = f"{task_name}(report_date={report_date},rerun_token={rerun_token})"
-    return re.sub(r"[^a-zA-Z0-9_.=(),-]+", "_", raw_identifier)
+def _read_json(path: Path) -> Any:
+    import json
+
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _coerce_list(value: Any) -> list[Any]:
+    return list(value) if isinstance(value, list) else []
+
+
+def _coerce_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+
+    return {str(key): entry_value for key, entry_value in value.items()}
+
+
+def _coerce_string(value: Any, fallback: str) -> str:
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return fallback
+    return str(value)
+
+
+def _coerce_optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _coerce_string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [_coerce_string(entry, "") for entry in value if _coerce_string(entry, "") != ""]
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _normalize_task_log(value: Any) -> dict[str, Any]:
+    task_log = value if isinstance(value, dict) else {}
+    entries = _coerce_list(task_log.get("entries"))
+    normalized_entries: list[dict[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        normalized_entries.append(
+            {
+                "at": _coerce_string(entry.get("at"), ""),
+                "stream": _coerce_string(entry.get("stream"), "stdout"),
+                "line": _coerce_string(entry.get("line"), ""),
+            }
+        )
+
+    return {"entries": normalized_entries}

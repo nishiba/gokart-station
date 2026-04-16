@@ -9,6 +9,14 @@ import { deleteOkResponseSchema } from "./common";
 
 export const listProjectsResponseSchema = z.array(projectSchema);
 export const projectResponseSchema = projectSchema;
+const projectConnectionUpdateSchema = projectConnectionSchema
+  .omit({
+    allowWorkspaceDirectorySymlink: true,
+  })
+  .partial()
+  .extend({
+    allowWorkspaceDirectorySymlink: z.boolean().optional(),
+  });
 
 export const createProjectRequestSchema = z.object({
   name: nonEmptyStringSchema,
@@ -19,7 +27,7 @@ export const createProjectRequestSchema = z.object({
 
 export const updateProjectRequestSchema = z.object({
   name: nonEmptyStringSchema.optional(),
-  connection: projectConnectionSchema.partial().optional(),
+  connection: projectConnectionUpdateSchema.optional(),
   defaultConfigProfileId: idSchema.nullable().optional(),
   defaultEnvProfileId: idSchema.nullable().optional(),
 });

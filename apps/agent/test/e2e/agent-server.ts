@@ -1,11 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { buildApp } from "../../src/app";
-import {
-  mockLuigidExecutablePath,
-  prepareSampleProjectFixture,
-  reserveLocalhostPort,
-} from "../helpers/sample-project";
+import { removeDirectoryWithRetries } from "../helpers/cleanup";
+import { prepareSampleProjectFixture, reserveLocalhostPort } from "../helpers/sample-project";
 
 const fixtureFilePath = process.env.GOKART_STATION_E2E_FIXTURE_FILE;
 
@@ -31,7 +28,7 @@ const start = async () => {
     JSON.stringify(
       {
         ...fixture,
-        pythonExecutable: "python3",
+        pythonExecutable: fixture.pythonExecutable,
         entrypointPath: "main.py",
         schedulerBaseUrl: `http://127.0.0.1:${schedulerPort}`,
       },
@@ -50,8 +47,7 @@ const start = async () => {
       pollIntervalMs: 50,
     },
     scheduler: {
-      executable: process.execPath,
-      argumentPrefix: [mockLuigidExecutablePath],
+      executable: fixture.luigidExecutable,
       runtimeDirectory: fixture.schedulerRuntimeDirectory,
       stopProcessOnDispose: true,
     },
@@ -59,10 +55,7 @@ const start = async () => {
 
   const shutdown = async () => {
     await app.close();
-    await fs.rm(fixture.tempRootDir, {
-      recursive: true,
-      force: true,
-    });
+    await removeDirectoryWithRetries(fixture.tempRootDir);
     await fs.rm(fixtureFilePath, {
       force: true,
     });

@@ -22,7 +22,9 @@ test("project/profile/mode API supports observer and operator flows", async () =
 
     assert.equal(healthResponse.statusCode, 200);
 
-    const observerWorkspaceDir = await createTempDirectory("gokart-station-observer-workspace-");
+    const observerWorkspaceDir = await fs.realpath(
+      await createTempDirectory("gokart-station-observer-workspace-"),
+    );
     const observerCreateResponse = await app.inject({
       method: "POST",
       url: "/api/projects",
@@ -38,6 +40,7 @@ test("project/profile/mode API supports observer and operator flows", async () =
     assert.equal(observerCreateResponse.statusCode, 201);
     const observerProject = observerCreateResponse.json();
     assert.equal(observerProject.connection.accessMode, "observer");
+    assert.equal(observerProject.connection.allowWorkspaceDirectorySymlink, false);
     assert.equal(observerProject.capabilities.canRun, false);
 
     const observerValidateResponse = await app.inject({
@@ -68,8 +71,12 @@ test("project/profile/mode API supports observer and operator flows", async () =
 
     assert.equal(observerProfileCreateResponse.statusCode, 403);
 
-    const operatorProjectRootDir = await createTempDirectory("gokart-station-operator-root-");
-    const operatorWorkspaceDir = await createTempDirectory("gokart-station-operator-workspace-");
+    const operatorProjectRootDir = await fs.realpath(
+      await createTempDirectory("gokart-station-operator-root-"),
+    );
+    const operatorWorkspaceDir = await fs.realpath(
+      await createTempDirectory("gokart-station-operator-workspace-"),
+    );
     const entrypointPath = path.join(operatorProjectRootDir, "main.py");
     const envSourcePath = path.join(operatorProjectRootDir, ".env");
     const luigiConfigPath = path.join(operatorProjectRootDir, "luigi.cfg");
@@ -99,6 +106,7 @@ test("project/profile/mode API supports observer and operator flows", async () =
     assert.equal(operatorCreateResponse.statusCode, 201);
     const operatorProject = operatorCreateResponse.json();
     assert.equal(operatorProject.connection.accessMode, "operator");
+    assert.equal(operatorProject.connection.allowWorkspaceDirectorySymlink, false);
     assert.equal(operatorProject.capabilities.canRun, true);
 
     const operatorValidateResponse = await app.inject({

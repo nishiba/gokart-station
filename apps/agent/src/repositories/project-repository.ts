@@ -56,6 +56,7 @@ const mapProjectConnection = (
     pythonExecutable: connection.pythonExecutable,
     entrypointPath: connection.entrypointPath,
     workspaceDirectory: connection.workspaceDirectory,
+    allowWorkspaceDirectorySymlink: connection.allowWorkspaceDirectorySymlink,
     luigiConfigPath: connection.luigiConfigPath,
     envSourcePath: connection.envSourcePath,
     schedulerBaseUrl: connection.schedulerBaseUrl,
@@ -92,6 +93,7 @@ const toConnectionCreateInput = (
     : {}),
   ...(connection.entrypointPath !== undefined ? { entrypointPath: connection.entrypointPath } : {}),
   workspaceDirectory: connection.workspaceDirectory,
+  allowWorkspaceDirectorySymlink: connection.allowWorkspaceDirectorySymlink ?? false,
   ...(connection.luigiConfigPath !== undefined
     ? { luigiConfigPath: connection.luigiConfigPath }
     : {}),
@@ -212,6 +214,10 @@ export class ProjectRepository {
         input.connection?.entrypointPath ?? existing.connection.entrypointPath ?? null,
       workspaceDirectory:
         input.connection?.workspaceDirectory ?? existing.connection.workspaceDirectory,
+      allowWorkspaceDirectorySymlink:
+        input.connection?.allowWorkspaceDirectorySymlink ??
+        existing.connection.allowWorkspaceDirectorySymlink ??
+        false,
       luigiConfigPath:
         input.connection?.luigiConfigPath ?? existing.connection.luigiConfigPath ?? null,
       envSourcePath: input.connection?.envSourcePath ?? existing.connection.envSourcePath ?? null,

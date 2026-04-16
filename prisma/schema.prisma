@@ -36,6 +36,7 @@ enum TaskState {
 enum SchedulerHealth {
   unknown
   healthy
+  partial
   degraded
   unreachable
 }
@@ -140,6 +141,7 @@ model ProjectConnection {
   pythonExecutable   String?
   entrypointPath     String?
   workspaceDirectory String
+  allowWorkspaceDirectorySymlink Boolean @default(false)
   luigiConfigPath    String?
   envSourcePath      String?
   schedulerBaseUrl   String?

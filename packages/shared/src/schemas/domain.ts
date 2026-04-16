@@ -30,7 +30,13 @@ export const taskStateSchema = z.enum([
   "UNKNOWN",
   "CANCELED",
 ]);
-export const schedulerHealthSchema = z.enum(["unknown", "healthy", "degraded", "unreachable"]);
+export const schedulerHealthSchema = z.enum([
+  "unknown",
+  "healthy",
+  "partial",
+  "degraded",
+  "unreachable",
+]);
 export const stopModeSchema = z.enum(["graceful", "force"]);
 export const rerunModeSchema = z.enum([
   "none",
@@ -102,6 +108,7 @@ export const projectConnectionSchema = z.object({
   pythonExecutable: filePathSchema.nullable().optional(),
   entrypointPath: filePathSchema.nullable().optional(),
   workspaceDirectory: filePathSchema,
+  allowWorkspaceDirectorySymlink: z.boolean().default(false),
   luigiConfigPath: filePathSchema.nullable().optional(),
   envSourcePath: filePathSchema.nullable().optional(),
   schedulerBaseUrl: urlSchema.nullable().optional(),
@@ -193,6 +200,44 @@ export const taskLineageNodeSchema = z.object({
   downstreamNodeIds: z.array(idSchema),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
+});
+
+export const compareResolutionStatusSchema = z.enum([
+  "matched",
+  "no_previous_success",
+  "no_candidate",
+  "ambiguous",
+]);
+
+export const compareResolutionStrategySchema = z.enum([
+  "task_name_unique_candidate",
+  "unique_id",
+  "parameter_fingerprint",
+  "topology_signature",
+  "output_path_signature",
+]);
+
+export const compareResolutionAttemptSchema = z.object({
+  strategy: compareResolutionStrategySchema,
+  candidateTaskNodeIds: z.array(idSchema),
+  candidateCount: z.number().int().nonnegative(),
+});
+
+export const compareResolutionMetadataSchema = z.object({
+  status: compareResolutionStatusSchema,
+  strategy: compareResolutionStrategySchema.nullable().optional(),
+  previousRunId: idSchema.nullable().optional(),
+  matchedTaskNodeId: idSchema.nullable().optional(),
+  sameTaskNameCandidateTaskNodeIds: z.array(idSchema),
+  attempts: z.array(compareResolutionAttemptSchema),
+  evidence: z.object({
+    currentUniqueId: nonEmptyStringSchema,
+    currentParameterFingerprint: z.string(),
+    currentUpstreamSignature: z.string(),
+    currentDownstreamSignature: z.string(),
+    currentOutputPathSignature: z.string(),
+  }),
+  message: z.string(),
 });
 
 export const taskGraphNodeSchema = z.object({

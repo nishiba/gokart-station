@@ -24,7 +24,14 @@
 ## Release Readiness
 
 - 第三者向けの入口は repo root の `README.md` と `examples/sample_gokart_project/README.md` とする
+- sample project の案内は maintainer ローカル絶対パスを使わず、clone 先に依存しない相対記法で書く
 - release 前チェックの source of truth は `docs/10-acceptance-criteria.md` と root `package.json` の `release:check` script とする
+- release preflight は次を最低限含む
+  - `pnpm install`
+  - sample project 用 Python environment の準備
+  - `pnpm release:check`
+  - separate target repo / separate workspace 前提の observer / operator 手動確認
+  - real `luigid` を使った release candidate smoke
 - sample gokart project を使った automated verification は次を含む
   - Python adapter integration
   - success / failed / partial failure
@@ -37,6 +44,7 @@
 
 - file tree は metadata-only browsing を MVP とし、直接 text preview / edit は含めない
 - support bundle export は runtime directory + `bundle.json` manifest を返す MVP とする
+- support bundle は masked 済み payload と metadata を集約する MVP とし、profile source file の中身は含めない
 - automated E2E / integration は localhost port bind が可能な環境を前提とする
 - scheduler lifecycle の automated check は localhost fixture process で行い、release candidate では real `luigid` での最終 smoke を推奨する
 

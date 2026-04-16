@@ -68,6 +68,10 @@ const taskStateValues = new Set<TaskState>([
   "CANCELED",
 ]);
 const textPreviewByteLimit = 64 * 1024;
+type CompareResolution = LineageComparePreviousSuccessResponse["diff"]["compareResolution"];
+type CompareResolutionAttempt = CompareResolution["attempts"][number];
+type CompareResolutionStrategy = NonNullable<CompareResolution["strategy"]>;
+type LineageNodeRecord = LineageComparePreviousSuccessResponse["current"];
 
 const isTerminalRunStatus = (status: RunStatus) => terminalRunStatuses.has(status);
 const isRecord = (value: unknown): value is Record<string, unknown> => {
@@ -130,6 +134,125 @@ const buildOutputPathDiff = (current: string[], previous: string[]) => {
   return {
     added: current.filter((pathEntry) => !previousSet.has(pathEntry)),
     removed: previous.filter((pathEntry) => !currentSet.has(pathEntry)),
+  };
+};
+
+const normalizeComparableValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((entry) => normalizeComparableValue(entry));
+  }
+
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort((left, right) => left.localeCompare(right))
+        .map((key) => [key, normalizeComparableValue(value[key])]),
+    );
+  }
+
+  return value;
+};
+
+const stableSerialize = (value: unknown) => JSON.stringify(normalizeComparableValue(value));
+
+const buildParameterFingerprint = (parameters: Record<string, unknown>) => {
+  return stableSerialize(parameters);
+};
+
+const buildOutputPathSignature = (outputs: string[]) => {
+  return stableSerialize(outputs.map((outputPath) => path.basename(outputPath)).sort());
+};
+
+const buildTopologySignature = (
+  node: LineageNodeRecord,
+  nodeById: Map<string, LineageNodeRecord>,
+) => {
+  const upstreamTaskNames = node.upstreamNodeIds
+    .map((nodeId) => nodeById.get(nodeId)?.taskName ?? `unknown:${nodeId}`)
+    .sort((left, right) => left.localeCompare(right));
+  const downstreamTaskNames = node.downstreamNodeIds
+    .map((nodeId) => nodeById.get(nodeId)?.taskName ?? `unknown:${nodeId}`)
+    .sort((left, right) => left.localeCompare(right));
+
+  return {
+    upstream: stableSerialize(upstreamTaskNames),
+    downstream: stableSerialize(downstreamTaskNames),
+  };
+};
+
+const compareResolutionStrategyLabel: Record<CompareResolutionStrategy, string> = {
+  task_name_unique_candidate: "single same-task candidate",
+  unique_id: "uniqueId",
+  parameter_fingerprint: "parameter fingerprint",
+  topology_signature: "topology signature",
+  output_path_signature: "output path signature",
+};
+
+const buildCompareResolutionAttempt = (
+  strategy: CompareResolutionStrategy,
+  candidates: LineageNodeRecord[],
+): CompareResolutionAttempt => {
+  return {
+    strategy,
+    candidateTaskNodeIds: candidates.map((candidate) => candidate.id),
+    candidateCount: candidates.length,
+  };
+};
+
+const buildCompareResolutionEvidence = (
+  current: LineageNodeRecord,
+  currentNodeById: Map<string, LineageNodeRecord>,
+) => {
+  const topologySignature = buildTopologySignature(current, currentNodeById);
+
+  return {
+    currentUniqueId: current.uniqueId,
+    currentParameterFingerprint: buildParameterFingerprint(current.parameters),
+    currentUpstreamSignature: topologySignature.upstream,
+    currentDownstreamSignature: topologySignature.downstream,
+    currentOutputPathSignature: buildOutputPathSignature(current.outputs),
+  };
+};
+
+const buildEmptyCompareDiff = (compareResolution: CompareResolution) => {
+  return {
+    parameterDiff: {},
+    stateChanged: false,
+    processingTimeDiffSec: null,
+    outputPathDiff: {
+      added: [],
+      removed: [],
+    },
+    compareResolution,
+  };
+};
+
+const buildCompareResponse = (
+  current: LineageNodeRecord,
+  previous: LineageNodeRecord | null,
+  compareResolution: CompareResolution,
+): LineageComparePreviousSuccessResponse => {
+  if (!previous) {
+    return {
+      current,
+      previous: null,
+      diff: buildEmptyCompareDiff(compareResolution),
+    };
+  }
+
+  return {
+    current,
+    previous,
+    diff: {
+      parameterDiff: buildParameterDiff(current.parameters, previous.parameters),
+      stateChanged: current.state !== previous.state,
+      processingTimeDiffSec:
+        current.processingTimeSec != null && previous.processingTimeSec != null
+          ? Number((current.processingTimeSec - previous.processingTimeSec).toFixed(6))
+          : null,
+      outputPathDiff: buildOutputPathDiff(current.outputs, previous.outputs),
+      compareResolution,
+    },
   };
 };
 
@@ -373,6 +496,9 @@ export class RunService {
       this.getRun(runId),
       this.getLineageNode(runId, taskNodeId),
     ]);
+    const currentLineage = await this.runRepository.listLineage(runId);
+    const currentNodeById = new Map(currentLineage.map((node) => [node.id, node]));
+    const evidence = buildCompareResolutionEvidence(current, currentNodeById);
     const previousRun = await this.runRepository.findPreviousSuccessfulRun(
       run.projectId,
       run.spec.rootTaskName,
@@ -380,54 +506,134 @@ export class RunService {
     );
 
     if (!previousRun) {
-      return {
-        current,
-        previous: null,
-        diff: {
-          parameterDiff: {},
-          stateChanged: false,
-          processingTimeDiffSec: null,
-          outputPathDiff: {
-            added: [],
-            removed: [],
-          },
-        },
-      };
+      return buildCompareResponse(current, null, {
+        status: "no_previous_success",
+        strategy: null,
+        previousRunId: null,
+        matchedTaskNodeId: null,
+        sameTaskNameCandidateTaskNodeIds: [],
+        attempts: [],
+        evidence,
+        message: "No previous successful run is available for compare.",
+      });
     }
 
-    const previous = await this.runRepository.findLineageNodeByRunAndTaskName(
-      previousRun.id,
-      current.taskName,
-    );
-    if (!previous) {
-      return {
-        current,
-        previous: null,
-        diff: {
-          parameterDiff: {},
-          stateChanged: false,
-          processingTimeDiffSec: null,
-          outputPathDiff: {
-            added: [],
-            removed: [],
-          },
-        },
-      };
+    const [previousLineage, sameTaskNameCandidates] = await Promise.all([
+      this.runRepository.listLineage(previousRun.id),
+      this.runRepository.listLineageNodesByRunAndTaskName(previousRun.id, current.taskName),
+    ]);
+    const previousNodeById = new Map(previousLineage.map((node) => [node.id, node]));
+
+    if (sameTaskNameCandidates.length === 0) {
+      return buildCompareResponse(current, null, {
+        status: "no_candidate",
+        strategy: null,
+        previousRunId: previousRun.id,
+        matchedTaskNodeId: null,
+        sameTaskNameCandidateTaskNodeIds: [],
+        attempts: [],
+        evidence,
+        message: `No ${current.taskName} node exists in the previous successful run.`,
+      });
     }
 
-    return {
-      current,
-      previous,
-      diff: {
-        parameterDiff: buildParameterDiff(current.parameters, previous.parameters),
-        stateChanged: current.state !== previous.state,
-        processingTimeDiffSec:
-          current.processingTimeSec != null && previous.processingTimeSec != null
-            ? Number((current.processingTimeSec - previous.processingTimeSec).toFixed(6))
-            : null,
-        outputPathDiff: buildOutputPathDiff(current.outputs, previous.outputs),
-      },
-    };
+    const currentParameterFingerprint = buildParameterFingerprint(current.parameters);
+    const currentTopologySignature = buildTopologySignature(current, currentNodeById);
+    const currentOutputPathSignature = buildOutputPathSignature(current.outputs);
+
+    const attempts: CompareResolutionAttempt[] = [
+      buildCompareResolutionAttempt(
+        "unique_id",
+        sameTaskNameCandidates.filter((candidate) => candidate.uniqueId === current.uniqueId),
+      ),
+      buildCompareResolutionAttempt(
+        "parameter_fingerprint",
+        sameTaskNameCandidates.filter(
+          (candidate) =>
+            buildParameterFingerprint(candidate.parameters) === currentParameterFingerprint,
+        ),
+      ),
+      buildCompareResolutionAttempt(
+        "topology_signature",
+        sameTaskNameCandidates.filter((candidate) => {
+          const topologySignature = buildTopologySignature(candidate, previousNodeById);
+          return (
+            topologySignature.upstream === currentTopologySignature.upstream &&
+            topologySignature.downstream === currentTopologySignature.downstream
+          );
+        }),
+      ),
+      buildCompareResolutionAttempt(
+        "output_path_signature",
+        sameTaskNameCandidates.filter(
+          (candidate) => buildOutputPathSignature(candidate.outputs) === currentOutputPathSignature,
+        ),
+      ),
+    ];
+
+    const matchedAttempt = attempts.find((attempt) => attempt.candidateCount === 1);
+    if (matchedAttempt) {
+      const matchedTaskNodeId = matchedAttempt.candidateTaskNodeIds[0];
+      const previous = sameTaskNameCandidates.find(
+        (candidate) => candidate.id === matchedTaskNodeId,
+      );
+      if (!previous) {
+        throw new HttpError(500, "Matched compare target could not be resolved.");
+      }
+
+      return buildCompareResponse(current, previous, {
+        status: "matched",
+        strategy: matchedAttempt.strategy,
+        previousRunId: previousRun.id,
+        matchedTaskNodeId: previous.id,
+        sameTaskNameCandidateTaskNodeIds: sameTaskNameCandidates.map((candidate) => candidate.id),
+        attempts,
+        evidence,
+        message: `Matched previous ${current.taskName} node by ${compareResolutionStrategyLabel[matchedAttempt.strategy]}.`,
+      });
+    }
+
+    if (sameTaskNameCandidates.length === 1) {
+      const previous = sameTaskNameCandidates[0];
+      if (!previous) {
+        throw new HttpError(500, "Single compare candidate could not be resolved.");
+      }
+
+      return buildCompareResponse(current, previous, {
+        status: "matched",
+        strategy: "task_name_unique_candidate",
+        previousRunId: previousRun.id,
+        matchedTaskNodeId: previous.id,
+        sameTaskNameCandidateTaskNodeIds: [previous.id],
+        attempts,
+        evidence,
+        message: `Resolved compare target because the previous successful run has a single ${current.taskName} candidate.`,
+      });
+    }
+
+    if (sameTaskNameCandidates.length > 1) {
+      return buildCompareResponse(current, null, {
+        status: "ambiguous",
+        strategy: null,
+        previousRunId: previousRun.id,
+        matchedTaskNodeId: null,
+        sameTaskNameCandidateTaskNodeIds: sameTaskNameCandidates.map((candidate) => candidate.id),
+        attempts,
+        evidence,
+        message: `Ambiguous compare target: ${sameTaskNameCandidates.length} previous ${current.taskName} candidates remain after heuristic matching.`,
+      });
+    }
+
+    return buildCompareResponse(current, null, {
+      status: "no_candidate",
+      strategy: null,
+      previousRunId: previousRun.id,
+      matchedTaskNodeId: null,
+      sameTaskNameCandidateTaskNodeIds: sameTaskNameCandidates.map((candidate) => candidate.id),
+      attempts,
+      evidence,
+      message: `Previous ${current.taskName} candidates existed, but none matched compare heuristics uniquely.`,
+    });
   }
 
   async getArtifacts(runId: string) {
@@ -499,6 +705,10 @@ export class RunService {
       raw: snapshots.map((snapshot) => ({
         snapshotId: snapshot.id,
         health: snapshot.health,
+        activeTaskCount: snapshot.activeTaskCount,
+        pendingTaskCount: snapshot.pendingTaskCount,
+        failedTaskCount: snapshot.failedTaskCount,
+        workerCount: snapshot.workerCount,
         capturedAt: snapshot.capturedAt,
         raw: snapshot.raw,
       })),
@@ -1052,6 +1262,7 @@ export class RunService {
 
     return {
       configValues: configProfile.values,
+      configMaskedKeys: configProfile.maskedKeys,
       envValues: envProfile.values,
       envMaskedKeys: envProfile.maskedKeys,
     };
@@ -1109,6 +1320,7 @@ export class RunService {
     run: Run,
     resolvedProfiles: {
       configValues: Record<string, string>;
+      configMaskedKeys: string[];
       envValues: Record<string, string>;
       envMaskedKeys: string[];
     },
@@ -1126,6 +1338,7 @@ export class RunService {
       envSourcePath: project.connection.envSourcePath ?? null,
       schedulerBaseUrl: project.connection.schedulerBaseUrl ?? null,
       configValues: resolvedProfiles.configValues,
+      configMaskedKeys: resolvedProfiles.configMaskedKeys,
       envValues: resolvedProfiles.envValues,
       envMaskedKeys: resolvedProfiles.envMaskedKeys,
       spec: run.spec,
