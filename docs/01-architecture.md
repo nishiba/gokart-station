@@ -36,6 +36,16 @@ Target Gokart Project  <---->  Workspace Directory
 station と target repo は **別ディレクトリ / 別レポジトリ** を前提にする。  
 同一 repo へ押し込む設計にはしない。
 
+## AccessMode と CapabilitySet
+
+- mode の正準語彙は `AccessMode` とする
+- `ProjectConnection.accessMode` が mode の真実源である
+- capability の正準語彙は `CapabilitySet` とする
+- `CapabilitySet` は `AccessMode` と接続 validate 結果から agent 側で導出する
+- `workspace_directory` のみで接続する project は `observer` に固定する
+- run / stop / rerun / profile resolve / profile edit / scheduler lifecycle は `operator` 以上でのみ有効化する
+- screen / route ごとに独自の mode 解釈を持ち込まず、shared schema と service で判定を統一する
+
 ## コンポーネント責務
 
 ### 1. React UI
@@ -52,7 +62,7 @@ station と target repo は **別ディレクトリ / 別レポジトリ** を�
 
 ### 2. Node Control Plane
 責務:
-- Project / Profile / ConnectionMode 管理
+- Project / Profile / AccessMode 管理
 - `luigid` の start / stop / restart / health
 - Python adapter 実行
 - イベント集約
@@ -106,6 +116,7 @@ watch event は補助情報に留める。
 - `canReadArtifacts = true`
 - `canRun = false`
 - `canStop = false`
+- `canRerun = false`
 - `canEditProfiles = false`
 - `canManageScheduler = false`
 
@@ -113,6 +124,7 @@ watch event は補助情報に留める。
 - Observer に加えて
 - `canRun = true`
 - `canStop = true`
+- `canRerun = true`
 - `canEditProfiles = true`
 - `canManageScheduler = true`
 
@@ -144,7 +156,7 @@ Node Control Plane は write model と read model を分ける。
 
 1. UI が RunSpec を作成
 2. Node が project / mode / profiles を解決
-3. Node が capability を確認
+3. Node が `AccessMode` と validate 結果から `CapabilitySet` を解決し、control API の可否を確認
 4. Node が `luigid` を起動または健全性確認
 5. Node が Python adapter を起動
 6. Python adapter が gokart run を開始
@@ -152,7 +164,7 @@ Node Control Plane は write model と read model を分ける。
 8. Node が DB と SSE に反映
 9. UI がリアルタイム表示
 
-Observer mode では 1〜7 を許可しない。
+Observer mode では run lifecycle に入らず、既存 run / artifact / raw payload の read-only 表示に限定する。
 
 ## Stop Lifecycle
 

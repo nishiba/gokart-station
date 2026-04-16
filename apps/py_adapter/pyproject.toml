@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gokart-station-adapter"
+version = "0.1.0"
+description = "Python adapter scaffold for gokart-station"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+gokart-station-adapter = "gokart_station_adapter.main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["gokart_station_adapter*"]

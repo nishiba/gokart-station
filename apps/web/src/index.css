@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 42 44% 97%;
+    --foreground: 215 39% 11%;
+    --card: 0 0% 100%;
+    --card-foreground: 215 39% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 215 39% 11%;
+    --primary: 202 82% 24%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 35 67% 90%;
+    --secondary-foreground: 215 39% 11%;
+    --muted: 35 43% 93%;
+    --muted-foreground: 215 16% 36%;
+    --accent: 18 78% 56%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214 32% 84%;
+    --input: 214 32% 84%;
+    --ring: 202 82% 24%;
+    --radius: 1rem;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: "IBM Plex Sans", "Avenir Next", sans-serif;
+    background-image:
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.16), transparent 35%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 248, 235, 0.96)),
+      linear-gradient(to right, rgba(15, 23, 42, 0.08) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(15, 23, 42, 0.08) 1px, transparent 1px);
+    background-size:
+      auto,
+      auto,
+      32px 32px,
+      32px 32px;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}

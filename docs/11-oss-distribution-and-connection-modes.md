@@ -11,12 +11,14 @@
 - monorepo 前提にしない
 - target repo に station 用 TS / UI コードを置かせない
 
-### 2. 接続モードを明示する
+### 2. AccessMode を明示する
 - observer
 - operator
 - managed
 
 mode が曖昧だと、workspace-only 接続なのに run を押せてしまうなどの事故が起きる。
+
+実装上の正準語彙は `AccessMode` と `CapabilitySet` とする。
 
 ### 3. workspace-only 接続の価値を認める
 workspace しか見えない環境でも、artifact / logs / raw payload / support export の価値はある。  

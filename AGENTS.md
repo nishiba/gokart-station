@@ -5,12 +5,13 @@
 - このファイルを、このリポジトリの開発ルールの source of truth とする
 - プロダクト設計の source of truth は `docs/*` とする
 - 実装判断で迷ったら `README.md` より先に `AGENTS.md` と `docs/*` を優先する
+- 完成条件の source of truth は `docs/10-acceptance-criteria.md` とする
 - 画面仕様は `docs/02-screen-spec.md`
 - 型定義は `docs/03-typescript-types.md`
 - API 契約は `docs/04-api-contract.md`
 - アーキテクチャは `docs/01-architecture.md`
 - Python adapter の責務は `docs/06-python-adapter-and-runner.md`
-- OSS 配布と接続モードの前提は `docs/11-oss-distribution-and-connection-modes.md`
+- OSS 配布と AccessMode の前提は `docs/11-oss-distribution-and-connection-modes.md`
 
 ---
 
@@ -33,25 +34,32 @@
 
 ## 3. Access Modes
 
-### 3.1 固定モード
-- `observer`
-- `operator`
-- `managed`
+### 3.1 正準語彙
+- mode の正準語彙は `AccessMode` とする
+- `AccessMode` の値は `observer | operator | managed` に固定する
+- capability の正準語彙は `CapabilitySet` とする
+- `CapabilitySet` は `AccessMode` と `ProjectConnection` の validate 結果から導出する
+- workspace-only 接続は `observer` に固定する
+- run control は `operator` 以上でのみ有効化する
 
 ### 3.2 observer
 - workspace の read-only 観測のみ
+- target repo 非依存で接続できる
 - run / stop / rerun を禁止
+- profile resolve を禁止
 - profile 編集を禁止
 - scheduler lifecycle 操作を禁止
 
 ### 3.3 operator
 - observer に加えて
+- target repo の project root / Python / entrypoint / config / env / workspace を解決した上で使う
 - run / stop / rerun を許可
+- profile resolve を許可
 - profile 編集を許可
 - scheduler lifecycle 操作を許可
 
 ### 3.4 managed
-- operator を含む
+- operator の capability を含む
 - Python adapter package 化や将来の sidecar / remote store 対応の余地を保つ
 
 ---
@@ -136,6 +144,7 @@ first-class object は次である。
 - `TaskLineageNode`
 - `ArtifactManifestEntry`
 - `TimelineEvent`
+- `WatchEvent`
 
 `TaskLineageNode` と `ArtifactManifestEntry` を補助型に落としてはならない。
 
@@ -184,6 +193,7 @@ first-class object は次である。
   - adapter events
   - scheduler payload
   - stderr
+- support bundle は runtime 配下に生成し、mode / capability / validation snapshot を必ず含める
 
 ---
 
@@ -196,6 +206,7 @@ first-class object は次である。
 - env secret をログ出力しない
 - process group 単位で cleanup する
 - zombie process を残さない
+- watch service は sandbox scope 外を監視しない
 
 ---
 
@@ -220,6 +231,7 @@ first-class object は次である。
 - spawn / stop / cleanup を service に閉じる
 - SSE イベントの型を shared に合わせる
 - mode 判定と capability 判定を service 層で統一する
+- file tree / watch / support bundle も service 層で sandbox 判定を通す
 
 ### py_adapter
 - event は JSONL
@@ -255,7 +267,21 @@ docs 未更新の実装追加は禁止する。
 
 ---
 
-## 14. PR Rules
+## 14. Release Readiness Rules
+
+- release 前の user-facing source of truth は `README.md`, `docs/README.md`, `docs/10-acceptance-criteria.md`, `AGENTS.md` の 4 点を同期する
+- sample project を使った observer / operator の再現手順を `README.md` に残す
+- release 前チェックは root `package.json` の `release:check` script を基準にする
+- automated verification には success / failed / partial failure, observer / operator 差分, scheduler lifecycle, support bundle content, web smoke E2E を含める
+- known limitations は実装と矛盾しない形で文書化する
+- file tree は metadata-only browsing のまま release してよく、未実装の text preview を完成済みとして扱ってはならない
+- support bundle export が runtime directory + manifest であることを隠さない
+- localhost port bind を禁止する sandbox では E2E / integration が偽陰性になりうることを明記する
+- release candidate では real `luigid` を使った operator smoke を 1 回行う
+
+---
+
+## 15. PR Rules
 
 ### PR の粒度
 - PR は小さく保つ
@@ -267,3 +293,7 @@ docs 未更新の実装追加は禁止する。
 - typecheck
 - test
 - mode / capability の破壊がないこと
+
+### Definition of Done
+- MVP 完了条件は `docs/10-acceptance-criteria.md` の Common / Observer / Operator を満たすこと
+- `managed` は拡張余地の確認対象であり、MVP 完了条件は operator の受け入れを満たした上で managed への余地を壊していないこととする

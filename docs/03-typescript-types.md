@@ -277,3 +277,104 @@ export interface ProjectValidationResult {
 - `Project.capabilities` は mode と path 解決結果から導出される read model である
 - observer mode では `projectRootDir`, `pythonExecutable`, `entrypointPath` は `null` を許容する
 - run は `accessMode` を固定して保存し、後から project mode を変えても過去 run の意味を壊さない
+
+## Python adapter contract
+
+Python adapter process とは `RunSpec` そのものではなく、次の envelope を受け渡す。
+
+```ts
+export interface AdapterRunRequest {
+  runId: RunId;
+  projectId: ProjectId;
+  projectName: string;
+  accessMode: AccessMode;
+  projectRootDir?: string | null;
+  workspaceDirectory: string;
+  pythonExecutable?: string | null;
+  entrypointPath?: string | null;
+  luigiConfigPath?: string | null;
+  envSourcePath?: string | null;
+  schedulerBaseUrl?: string | null;
+  configValues: Record<string, string>;
+  envValues: Record<string, string>;
+  envMaskedKeys: string[];
+  spec: RunSpec;
+}
+```
+
+adapter event contract は JSONL の discriminated union とする。
+
+```ts
+export type AdapterEventType =
+  | "run.started"
+  | "run.status_changed"
+  | "scheduler.snapshot"
+  | "task.discovered"
+  | "task.status_changed"
+  | "task.log"
+  | "artifact.discovered"
+  | "raw.task_info_tree"
+  | "raw.task_info_table"
+  | "adapter.warning"
+  | "adapter.error"
+  | "run.finished";
+```
+
+### event payload rule
+
+- 全 event は `type`, `runId`, `at` を持つ
+- `task.discovered` は `taskName`, `uniqueId`, `state`, `parameters`, `outputs`, `upstreamUniqueIds`, `downstreamUniqueIds` を持つ
+- `task.status_changed` は `taskName`, `uniqueId`, `state` を持つ
+- `task.log` は `taskName`, `uniqueId`, `stream`, `line` を持つ
+- `scheduler.snapshot` は `health`, `activeTaskCount`, `pendingTaskCount`, `failedTaskCount`, `workerCount`, `raw` を持つ
+- `artifact.discovered` は `kind`, `absolutePath`, `relativePath`, `previewable` を持つ
+- `raw.task_info_tree` / `raw.task_info_table` は `raw` を持つ
+- `adapter.warning` / `adapter.error` は `code`, `message` を持つ
+- `run.finished` は `status`, `exitCode?`, `errorSummary?` を持つ
+
+## Run SSE stream contract
+
+`GET /api/runs/:runId/logs/stream` は SSE を返し、`event` 名は次に固定する。
+
+```ts
+export type RunStreamEvent =
+  | { event: "run"; data: Run }
+  | { event: "log"; data: LogEvent }
+  | { event: "timeline"; data: TimelineEvent }
+  | { event: "scheduler"; data: SchedulerSnapshot };
+```
+
+- 接続直後に既存の persisted event を replay してよい
+- run が active な間は後続 event を push する
+- run が terminal (`success | failed | canceled`) に入ったら stream は close してよい
+
+## Artifact Preview / Raw DTO
+
+artifact preview は text と binary を分ける。
+
+```ts
+export type ArtifactContentResponse =
+  | {
+      artifactId: ArtifactId;
+      mimeType?: string | null;
+      contentType: "text";
+      text: string;
+      truncated: boolean;
+      byteLength: number;
+    }
+  | {
+      artifactId: ArtifactId;
+      mimeType?: string | null;
+      contentType: "binary";
+      base64: string;
+      truncated: boolean;
+      byteLength: number;
+    };
+
+export interface RawPayloadResponse {
+  raw: unknown;
+}
+```
+
+- `GET /api/artifacts/:artifactId/content` は `ArtifactContentResponse`
+- `GET /api/runs/:runId/raw/*` は `RawPayloadResponse`

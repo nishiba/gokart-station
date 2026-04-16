@@ -63,6 +63,39 @@ apps/py_adapter/
 ### input
 stdin または temp file で RunSpec を渡す。
 
+実際の process contract は `RunSpec` 単体ではなく、station と target repo を分離したまま spawn できる `AdapterRunRequest` envelope とする。
+
+```json
+{
+  "runId": "run_1",
+  "projectId": "proj_1",
+  "projectName": "sample-project",
+  "accessMode": "operator",
+  "projectRootDir": "/Users/me/dev/sample",
+  "workspaceDirectory": "/Users/me/data/sample-workspace",
+  "pythonExecutable": "/Users/me/.pyenv/shims/python",
+  "entrypointPath": "main.py",
+  "schedulerBaseUrl": "http://127.0.0.1:8082",
+  "configValues": {
+    "sample_key": "value"
+  },
+  "envValues": {
+    "ENV_NAME": "value"
+  },
+  "envMaskedKeys": [
+    "SECRET_TOKEN"
+  ],
+  "spec": {
+    "rootTaskName": "sample.SomeTask",
+    "parameters": {},
+    "rerunMode": "same_spec",
+    "captureTaskInfoTree": true,
+    "captureTaskInfoTable": true,
+    "captureArtifactManifest": true
+  }
+}
+```
+
 ### output
 stdout は JSON Lines を優先する。  
 stderr は debug / raw error 用とする。
@@ -75,6 +108,23 @@ event 例:
 {"type":"artifact.discovered","path":"/tmp/resources/output.pkl","kind":"output","at":"..."}
 {"type":"run.finished","runId":"run_1","status":"success","at":"..."}
 ```
+
+event contract は次を最低限固定する。
+
+- `run.started`
+- `run.status_changed`
+- `scheduler.snapshot`
+- `task.discovered`
+- `task.status_changed`
+- `task.log`
+- `artifact.discovered`
+- `raw.task_info_tree`
+- `raw.task_info_table`
+- `adapter.warning`
+- `adapter.error`
+- `run.finished`
+
+各 event は `type`, `runId`, `at` を共通で持つ。
 
 ## scheduler 連携
 
@@ -98,6 +148,9 @@ lineage node は最低限以下を持つ。
 - task log
 - upstream / downstream
 
+MVP では adapter が task info tree / table を JSON で返し、Node 側の主要 read model はその JSON を優先して構築する。  
+text tree-info は raw artifact として保持するが、中心 read model にはしない。
+
 ## artifact manifest 生成
 
 gokart supplementary files を kind に分類する。
@@ -112,6 +165,15 @@ gokart supplementary files を kind に分類する。
 - task_info_table
 - adapter_events
 - scheduler_snapshot
+
+MVP では task ごとに最低限次を artifact として辿れるようにする。
+
+- output
+- task_log
+- task_params
+- processing_time
+- task_info_tree
+- task_info_table
 
 ## stop 実装
 
@@ -134,3 +196,12 @@ adapter は partial failure を許容する。
 
 observer mode では adapter を run 実行のためには使わない。  
 必要なら raw artifact の後処理や support bundle 生成に限定して使う。
+
+## sample fixture
+
+検証用 target repo は `examples/sample_gokart_project` に置く。
+
+- station repo と同じディレクトリ配下に同梱してよいが、test では temp copy を作って **別ディレクトリの target repo** として扱う
+- workspace は `projectRootDir` とは別の外部ディレクトリを向けられるようにする
+- observer mode では sample project の workspace を read-only で観測し、run / scheduler lifecycle は使わない
+- operator mode では sample project の `main.py` を entrypoint にして validate / scheduler / adapter integration を行う

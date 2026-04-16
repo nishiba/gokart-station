@@ -13,17 +13,89 @@ agent の生存確認。
 `luigid` との接続状態確認。  
 observer mode の project では global scheduler health として返してよい。
 
+クエリ:
+- `projectId` 任意
+
+レスポンス例:
+```json
+{
+  "health": "healthy",
+  "checkedAt": "2026-04-15T12:00:00.000Z",
+  "schedulerBaseUrl": "http://127.0.0.1:8082",
+  "host": "127.0.0.1",
+  "port": 8082,
+  "isLocalhost": true,
+  "isManagedByStation": true,
+  "isProcessAlive": true,
+  "portConflict": false,
+  "pid": 12345,
+  "startedAt": "2026-04-15T11:59:58.000Z",
+  "pidFilePath": "/path/to/station-runtime/scheduler/luigid.pid.json",
+  "logDirectory": "/path/to/station-runtime/scheduler/logs",
+  "stdoutLogPath": "/path/to/station-runtime/scheduler/logs/stdout.log",
+  "stderrLogPath": "/path/to/station-runtime/scheduler/logs/stderr.log",
+  "message": "Scheduler is reachable."
+}
+```
+
 ### `POST /api/scheduler/start`
 local `luigid` 起動。operator / managed のみ。
+
+リクエスト:
+```json
+{
+  "projectId": "proj_xxx"
+}
+```
+
+レスポンス:
+- `GET /api/scheduler/health` と同じ shape
 
 ### `POST /api/scheduler/stop`
 local `luigid` 停止。operator / managed のみ。
 
+リクエスト:
+```json
+{
+  "projectId": "proj_xxx"
+}
+```
+
+レスポンス:
+- `GET /api/scheduler/health` と同じ shape
+
 ### `POST /api/scheduler/restart`
 local `luigid` 再起動。operator / managed のみ。
 
+リクエスト:
+```json
+{
+  "projectId": "proj_xxx"
+}
+```
+
+レスポンス:
+- `GET /api/scheduler/health` と同じ shape
+
 ### `GET /api/scheduler/logs`
 scheduler log 取得。
+
+クエリ:
+- `limit` 任意
+
+レスポンス例:
+```json
+{
+  "stdoutLogPath": "/path/to/station-runtime/scheduler/logs/stdout.log",
+  "stderrLogPath": "/path/to/station-runtime/scheduler/logs/stderr.log",
+  "lines": [
+    {
+      "stream": "stdout",
+      "line": "mock luigid listening on 127.0.0.1:8082"
+    }
+  ]
+}
+```
 
 ---
 
@@ -127,6 +199,9 @@ Run 作成と起動。
 }
 ```
 
+レスポンス:
+- `Run`
+
 ### `GET /api/runs/:runId`
 レスポンス:
 - `Run`
@@ -134,8 +209,36 @@ Run 作成と起動。
 ### `POST /api/runs/:runId/stop`
 operator / managed のみ。
 
+リクエスト:
+```json
+{
+  "mode": "graceful"
+}
+```
+
+`mode` は `graceful | force`。  
+未指定時は `graceful`。
+
+レスポンス:
+- `Run`
+
 ### `POST /api/runs/:runId/rerun`
 operator / managed のみ。
+
+リクエスト例:
+```json
+{
+  "rerunMode": "with_param_override",
+  "label": "rerun after fixing input",
+  "parameters": {
+    "date": "2026-04-16",
+    "rerun": true
+  }
+}
+```
+
+レスポンス:
+- 新しく作られた `Run`
 
 ### `GET /api/runs/:runId/timeline`
 レスポンス:
@@ -143,6 +246,30 @@ operator / managed のみ。
 
 ### `GET /api/runs/:runId/logs`
 ### `GET /api/runs/:runId/logs/stream`
+
+`GET /api/runs/:runId/logs` は巨大ログ向けにページング query を受けてよい。
+
+クエリ:
+- `limit` 任意
+- `offset` 任意
+
+レスポンス:
+- `LogEvent[]`
+
+`GET /api/runs/:runId/logs/stream` は `text/event-stream` を返す。  
+SSE event 名は次を使う。
+
+- `run`
+- `log`
+- `timeline`
+- `scheduler`
+
+data payload はそれぞれ `Run`, `LogEvent`, `TimelineEvent`, `SchedulerSnapshot` の JSON。
+
+補足:
+- 接続時に既存 persisted event を replay してよい
+- run が active の間は後続 event を push する
+- terminal status 到達後は stream を close してよい
 
 ---
 
@@ -175,10 +302,41 @@ artifact content diff は後回しとする。
 ### `GET /api/runs/:runId/artifacts`
 ### `GET /api/artifacts/:artifactId/content`
 
+`GET /api/artifacts/:artifactId/content` は preview payload を返す。
+
+text 例:
+```json
+{
+  "artifactId": "art_xxx",
+  "mimeType": "application/json",
+  "contentType": "text",
+  "text": "{\n  \"ok\": true\n}",
+  "truncated": false,
+  "byteLength": 18
+}
+```
+
+binary 例:
+```json
+{
+  "artifactId": "art_xxx",
+  "mimeType": "application/octet-stream",
+  "contentType": "binary",
+  "base64": "AAEC",
+  "truncated": false,
+  "byteLength": 3
+}
+```
+
 ### `GET /api/runs/:runId/raw/task-info-tree`
 ### `GET /api/runs/:runId/raw/task-info-table`
 ### `GET /api/runs/:runId/raw/scheduler`
 ### `GET /api/runs/:runId/raw/adapter-events`
+
+補足:
+- `raw/task-info-tree` と `raw/task-info-table` は adapter が出した JSON をそのまま返してよい
+- `raw/scheduler` は snapshot の raw payload 群を返してよい
+- `raw/adapter-events` は adapter JSONL を parse した event 配列を返してよい
 
 ---
 
@@ -187,12 +345,43 @@ artifact content diff は後回しとする。
 ### `GET /api/projects/:projectId/files/tree`
 observer でも許可。scope は mode により制限される。
 
+レスポンス:
+- `FileTreeNode[]`
+
+補足:
+- root node は `workspace`, `projectRoot`, `luigiConfigPath`, `envSourcePath` などの sandbox scope 単位で返してよい
+- symlink は follow せず、tree から除外してよい
+- 大規模 directory は station 側の scan limit を持ってよい
+
 ### `GET /api/projects/:projectId/watch-events`
 observer でも許可。
 
+クエリ:
+- `limit` 任意
+
+レスポンス:
+- `WatchEvent[]`
+
+補足:
+- watch event は補助情報であり、run state の真実源として扱わない
+- run と紐づかない watch event は `runId = null` でよい
+- 返却順は `occurredAt desc` を基本とする
+
 ### `POST /api/projects/:projectId/support-bundle`
-support bundle zip を生成する。observer / operator ともに許可。  
-含める内容は mode に応じて変わる。
+observer / operator ともに許可。  
+MVP では station runtime 配下に support bundle directory を生成し、`bundle.json` manifest artifact を返してよい。
+
+レスポンス:
+- `ArtifactManifestEntry`
+
+最低限含める内容:
+- project connection metadata
+- mode / capability snapshot
+- validation snapshot
+- recent watch events
+- files tree snapshot
+- recent runs summary
+- latest run の logs / timeline / artifact manifest / raw payloads の一部
 
 ---
 

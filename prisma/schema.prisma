@@ -1,0 +1,394 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+enum AccessMode {
+  observer
+  operator
+  managed
+}
+
+enum RunStatus {
+  draft
+  queued
+  starting
+  running
+  stopping
+  success
+  failed
+  canceled
+}
+
+enum TaskState {
+  PENDING
+  RUNNING
+  DONE
+  FAILED
+  DISABLED
+  UNKNOWN
+  CANCELED
+}
+
+enum SchedulerHealth {
+  unknown
+  healthy
+  degraded
+  unreachable
+}
+
+enum StopMode {
+  graceful
+  force
+}
+
+enum RerunMode {
+  none
+  same_spec
+  force_rerun_flag
+  with_param_override
+  with_profile_override
+}
+
+enum ProfileKind {
+  config
+  env
+}
+
+enum ArtifactKind {
+  output
+  task_log
+  task_params
+  processing_time
+  module_versions
+  random_seed
+  task_info_tree
+  task_info_table
+  scheduler_snapshot
+  config_source
+  env_source
+  adapter_events
+  support_bundle
+  other
+}
+
+enum WatchEventKind {
+  add
+  change
+  unlink
+}
+
+enum LogStream {
+  stdout
+  stderr
+  system
+}
+
+enum TimelineEventType {
+  run_created
+  adapter_started
+  scheduler_connected
+  task_state_changed
+  artifact_detected
+  stop_requested
+  run_finished
+  run_failed
+}
+
+enum ValidationIssueLevel {
+  error
+  warning
+}
+
+enum RunControlActionType {
+  run_created
+  stop_requested
+  rerun_requested
+  scheduler_start_requested
+  scheduler_stop_requested
+  scheduler_restart_requested
+}
+
+model Project {
+  id                   String               @id @default(cuid())
+  name                 String
+  defaultConfigProfileId String?
+  defaultEnvProfileId  String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  connection           ProjectConnection?
+  profiles             Profile[]            @relation("ProjectProfiles")
+  runSpecs             RunSpec[]
+  runs                 Run[]
+  runControlActions    RunControlAction[]
+  capabilitySnapshots  CapabilitySnapshot[]
+  schedulerSnapshots   SchedulerSnapshot[]
+  artifacts            ArtifactManifestEntry[]
+  watchEvents          WatchEvent[]
+
+  @@map("projects")
+}
+
+model ProjectConnection {
+  id                 String     @id @default(cuid())
+  projectId          String     @unique
+  accessMode         AccessMode
+  projectRootDir     String?
+  pythonExecutable   String?
+  entrypointPath     String?
+  workspaceDirectory String
+  luigiConfigPath    String?
+  envSourcePath      String?
+  schedulerBaseUrl   String?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  project            Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([accessMode])
+  @@map("project_connections")
+}
+
+model Profile {
+  id                   String      @id @default(cuid())
+  projectId            String
+  kind                 ProfileKind
+  name                 String
+  description          String?
+  extendsProfileId     String?
+  valuesJson           String      @default("{}")
+  maskedKeysJson       String      @default("[]")
+  isDefault            Boolean     @default(false)
+  enabledForModesJson  String      @default("[]")
+  createdAt            DateTime    @default(now())
+  updatedAt            DateTime    @updatedAt
+  envRunSpecs          RunSpec[]   @relation("RunSpecEnvProfile")
+  configRunSpecs       RunSpec[]   @relation("RunSpecConfigProfile")
+  extendedByProfiles   Profile[]   @relation("ProfileExtends")
+  extendsProfile       Profile?    @relation("ProfileExtends", fields: [extendsProfileId], references: [id], onDelete: SetNull)
+  project              Project     @relation("ProjectProfiles", fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, kind])
+  @@map("profiles")
+}
+
+model RunSpec {
+  id                     String    @id @default(cuid())
+  projectId              String
+  configProfileId        String?
+  envProfileId           String?
+  rootTaskName           String
+  label                  String?
+  parametersJson         String    @default("{}")
+  rerunMode              RerunMode
+  workerCount            Int?
+  captureTaskInfoTree    Boolean
+  captureTaskInfoTable   Boolean
+  captureArtifactManifest Boolean
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  configProfile          Profile?  @relation("RunSpecConfigProfile", fields: [configProfileId], references: [id], onDelete: SetNull)
+  envProfile             Profile?  @relation("RunSpecEnvProfile", fields: [envProfileId], references: [id], onDelete: SetNull)
+  project                Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run                    Run?
+
+  @@index([projectId, createdAt])
+  @@map("run_specs")
+}
+
+model Run {
+  id              String              @id @default(cuid())
+  projectId       String
+  runSpecId       String              @unique
+  accessMode      AccessMode
+  status          RunStatus
+  exitCode        Int?
+  stopMode        StopMode?
+  adapterPid      Int?
+  processGroupId  Int?
+  schedulerTaskId String?
+  startedAt       DateTime?
+  finishedAt      DateTime?
+  errorSummary    String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  actions         RunControlAction[]
+  artifacts       ArtifactManifestEntry[]
+  logEvents       LogEvent[]
+  project         Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  schedulerSnapshots SchedulerSnapshot[]
+  spec            RunSpec             @relation(fields: [runSpecId], references: [id], onDelete: Cascade)
+  taskLineageNodes TaskLineageNode[]
+  taskGraphEdges  TaskGraphEdge[]
+  timelineEvents  TimelineEvent[]
+  watchEvents     WatchEvent[]
+
+  @@index([projectId, status])
+  @@index([schedulerTaskId])
+  @@map("runs")
+}
+
+model RunControlAction {
+  id          String               @id @default(cuid())
+  projectId   String
+  runId       String?
+  type        RunControlActionType
+  stopMode    StopMode?
+  payloadJson String               @default("{}")
+  createdAt   DateTime             @default(now())
+  project     Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run         Run?                 @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([runId, createdAt])
+  @@map("run_control_actions")
+}
+
+model CapabilitySnapshot {
+  id                 String               @id @default(cuid())
+  projectId          String
+  canReadWorkspace   Boolean
+  canReadArtifacts   Boolean
+  canRun             Boolean
+  canStop            Boolean
+  canRerun           Boolean
+  canEditProfiles    Boolean
+  canManageScheduler Boolean
+  canInstallAdapter  Boolean
+  schedulerHealth    SchedulerHealth
+  validationOk       Boolean
+  issuesJson         String               @default("[]")
+  capturedAt         DateTime             @default(now())
+  project            Project              @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, capturedAt])
+  @@map("capability_snapshots")
+}
+
+model SchedulerSnapshot {
+  id              String           @id @default(cuid())
+  runId           String?
+  projectId       String
+  health          SchedulerHealth
+  activeTaskCount Int
+  pendingTaskCount Int
+  failedTaskCount Int
+  workerCount     Int
+  rawJson         String           @default("{}")
+  capturedAt      DateTime         @default(now())
+  project         Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run             Run?             @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, capturedAt])
+  @@index([runId, capturedAt])
+  @@map("scheduler_snapshots")
+}
+
+model TaskLineageNode {
+  id                    String                @id @default(cuid())
+  runId                 String
+  taskName              String
+  uniqueId              String
+  state                 TaskState
+  parametersJson        String                @default("{}")
+  outputsJson           String                @default("[]")
+  processingTimeSec     Float?
+  taskLogJson           String?
+  rerunReason           String?
+  codeVersionHint       String?
+  upstreamNodeIdsJson   String                @default("[]")
+  downstreamNodeIdsJson String                @default("[]")
+  createdAt             DateTime              @default(now())
+  updatedAt             DateTime              @updatedAt
+  artifacts             ArtifactManifestEntry[]
+  downstreamEdges       TaskGraphEdge[]       @relation("TaskGraphEdgeSource")
+  upstreamEdges         TaskGraphEdge[]       @relation("TaskGraphEdgeTarget")
+  run                   Run                   @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, state])
+  @@index([runId, uniqueId])
+  @@map("task_lineage_nodes")
+}
+
+model TaskGraphEdge {
+  id               String          @id @default(cuid())
+  runId            String
+  sourceTaskNodeId String
+  targetTaskNodeId String
+  createdAt        DateTime        @default(now())
+  run              Run             @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceTaskNode   TaskLineageNode @relation("TaskGraphEdgeSource", fields: [sourceTaskNodeId], references: [id], onDelete: Cascade)
+  targetTaskNode   TaskLineageNode @relation("TaskGraphEdgeTarget", fields: [targetTaskNodeId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@index([sourceTaskNodeId])
+  @@index([targetTaskNodeId])
+  @@map("task_graph_edges")
+}
+
+model ArtifactManifestEntry {
+  id           String       @id @default(cuid())
+  projectId    String
+  runId        String?
+  taskNodeId   String?
+  kind         ArtifactKind
+  absolutePath String
+  relativePath String
+  sizeBytes    Int?
+  mimeType     String?
+  previewable  Boolean
+  modifiedAt   DateTime?
+  createdAt    DateTime     @default(now())
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run          Run?         @relation(fields: [runId], references: [id], onDelete: Cascade)
+  taskNode     TaskLineageNode? @relation(fields: [taskNodeId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, kind])
+  @@index([runId, kind])
+  @@index([taskNodeId])
+  @@map("artifacts")
+}
+
+model TimelineEvent {
+  id          String            @id @default(cuid())
+  runId       String
+  type        TimelineEventType
+  message     String
+  at          DateTime
+  payloadJson String?
+  run         Run               @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, at])
+  @@map("timeline_events")
+}
+
+model LogEvent {
+  id    String    @id @default(cuid())
+  runId String
+  stream LogStream
+  line  String
+  at    DateTime
+  run   Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId, at])
+  @@map("log_events")
+}
+
+model WatchEvent {
+  id                   String          @id @default(cuid())
+  projectId            String
+  runId                String?
+  kind                 WatchEventKind
+  absolutePath         String
+  relativePath         String
+  inferredArtifactKind ArtifactKind?
+  occurredAt           DateTime
+  project              Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  run                  Run?            @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, occurredAt])
+  @@index([runId, occurredAt])
+  @@map("watch_events")
+}

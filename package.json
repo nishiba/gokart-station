@@ -1,0 +1,32 @@
+{
+  "name": "gokart-station",
+  "private": true,
+  "packageManager": "pnpm@10.11.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:agent": "pnpm --filter agent dev",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "postinstall": "prisma generate",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test:py-adapter": "python3 -m unittest discover -s apps/py_adapter/tests",
+    "test:integration": "pnpm --filter agent test && pnpm test:py-adapter",
+    "test:e2e": "playwright test",
+    "release:check": "pnpm lint && pnpm typecheck && pnpm --filter web build && pnpm test:integration && pnpm test:e2e",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@biomejs/biome": "^2.4.12",
+    "@prisma/client": "^7.7.0",
+    "@types/node": "^25.6.0",
+    "prisma": "^7.7.0",
+    "typescript": "^6.0.2"
+  }
+}

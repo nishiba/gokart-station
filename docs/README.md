@@ -6,12 +6,39 @@
 ## この版での重要な方針
 
 - `gokart-station` と対象 gokart プロジェクトは **独立ディレクトリ / 独立レポジトリ** を前提とする
-- 接続モードを **observer / operator / managed** に分ける
-- `workspace_directory` のみ見える場合は **observer mode** とし、実行制御は行わない
-- 実行・停止・profile 解決まで行う場合は **operator mode** とし、project root / entrypoint / Python / config / env / workspace へアクセスする
+- mode の正準語彙は `AccessMode`、capability の正準語彙は `CapabilitySet` とする
+- `AccessMode` は **observer / operator / managed** に固定する
+- `workspace_directory` のみ見える場合は `accessMode = observer` とし、実行制御は行わない
+- run / stop / rerun / profile resolve / profile edit / scheduler lifecycle は `operator` 以上でのみ有効化する
+- `CapabilitySet` は `AccessMode` と接続 validate 結果から導出する
 - Python adapter は target repo へ恒久的に埋め込まず、**別 package / 別実行体** として扱う
 - `--local-scheduler` は開発時の補助手段であり、制御面の中心は **localhost の `luigid`** とする
 - run state の真実源は filesystem watch event ではなく、**scheduler state → adapter metadata → supplementary files → artifact inventory → watch event** の順とする
+
+## 完成条件
+
+- MVP の Definition of Done は `docs/10-acceptance-criteria.md` とする
+- `Common` `Observer mode` `Operator mode` の全受け入れ条件を満たした時点を完成とする
+- `Managed mode` は完成条件そのものではなく、将来の adapter package / sidecar / remote store 対応の余地を壊していないことを確認対象とする
+
+## Release Readiness
+
+- 第三者向けの入口は repo root の `README.md` と `examples/sample_gokart_project/README.md` とする
+- release 前チェックの source of truth は `docs/10-acceptance-criteria.md` と root `package.json` の `release:check` script とする
+- sample gokart project を使った automated verification は次を含む
+  - Python adapter integration
+  - success / failed / partial failure
+  - observer / operator の mode 差分
+  - scheduler lifecycle
+  - support bundle content
+  - web smoke E2E
+
+## Known Limitations
+
+- file tree は metadata-only browsing を MVP とし、直接 text preview / edit は含めない
+- support bundle export は runtime directory + `bundle.json` manifest を返す MVP とする
+- automated E2E / integration は localhost port bind が可能な環境を前提とする
+- scheduler lifecycle の automated check は localhost fixture process で行い、release candidate では real `luigid` での最終 smoke を推奨する
 
 ## 文書一覧
 
@@ -37,7 +64,7 @@
 ## 読む順番
 
 1. Product overview
-2. OSS distribution and connection modes
+2. OSS distribution and access modes
 3. Architecture
 4. Screen spec
 5. Types / API

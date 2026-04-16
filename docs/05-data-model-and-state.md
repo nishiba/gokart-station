@@ -3,7 +3,7 @@
 ## 方針
 
 write model と read model を分離する。  
-さらに **connection mode と capability** を明示的にモデル化する。
+さらに **`AccessMode` と `CapabilitySet`** を明示的にモデル化する。
 
 ## Write Model
 
@@ -25,7 +25,7 @@ stop / rerun / scheduler start などの操作履歴。
 ## Read Model
 
 ### CapabilitySnapshot
-project connection と validate 結果から導出した実効 capability。
+project connection の `accessMode` と validate 結果から導出した実効 capability。
 
 ### RunSnapshot
 ある run の現在状態。
@@ -98,7 +98,7 @@ stop 要求受付
 #### stopping -> failed
 停止中に異常終了
 
-## Mode と capability の関係
+## AccessMode と CapabilitySet の関係
 
 ### Observer
 - read models のみ生成

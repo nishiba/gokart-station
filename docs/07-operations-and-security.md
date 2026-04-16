@@ -41,13 +41,15 @@ Node / Python adapter ともに、project root と workspace の sandbox を守�
 - zombie process を残さない
 - stop escalation timeout を設定する
 - scheduler start/stop も PID 管理する
+- scheduler runtime は station repo 配下の pidfile / logdir で管理する
+- scheduler lifecycle は localhost port のみを対象にする
 
 ## ログ取り扱い
 
 - stdout / stderr は行単位保存
 - env profile の masked key はログに出さない
 - raw stderr を保持する
-- 巨大ログはページングする
+- 巨大ログは `limit` / `offset` ベースでページングする
 - support bundle では secret を再マスクする
 
 ## Config / Env 編集
@@ -62,6 +64,10 @@ Node / Python adapter ともに、project root と workspace の sandbox を守�
 
 watch event は補助である。  
 run state は scheduler / adapter event を優先する。
+
+- watcher は sandbox 内の scope のみを対象にする
+- symlink は follow しない
+- project 削除 / app close 時に watcher cleanup を行う
 
 ## 障害時の見方
 
@@ -85,6 +91,9 @@ run state は scheduler / adapter event を優先する。
 - artifact manifest json
 - validation result
 - mode / capability snapshot
+
+MVP では station runtime 配下に support bundle directory を作り、その中の `bundle.json` を返してよい。  
+archive packaging は後段で追加してよいが、bundle 内容の欠落は不可とする。
 
 ## mode 別の運用制約
 

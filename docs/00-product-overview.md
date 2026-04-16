@@ -31,7 +31,9 @@ gokart は再現性、依存管理、出力管理に優れる一方、日常運�
 - target repo に恒久的な UI コードを置かない
 - 必要なら Python adapter を package として利用する
 
-## 接続モード
+## Access Mode
+
+以後の docs では mode の正準語彙を `AccessMode`、権限集合の正準語彙を `CapabilitySet` とする。
 
 ### 1. Observer mode
 必要アクセス:

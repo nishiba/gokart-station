@@ -1,0 +1,16 @@
+node_modules
+.pnpm-store
+dist
+coverage
+test-results
+playwright-report
+.DS_Store
+
+prisma/dev.db
+prisma/dev.db-journal
+.gokart-station
+
+apps/py_adapter/.venv
+apps/py_adapter/**/*.egg-info
+apps/py_adapter/**/__pycache__
+apps/py_adapter/**/*.pyc
